@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Assinafy API documentation
+    url: https://api.assinafy.com.br/v1/docs
+    about: Reference for every endpoint the SDK wraps.
+  - name: Support
+    url: https://assinafy.com.br
+    about: For account or billing questions please contact support.

@@ -1,0 +1,26 @@
+name: Feature request
+description: Propose a new capability or change to the SDK
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: Describe the use-case in your own words first.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed API or behavior
+      description: Sketch the call you'd like to make and what it should return.
+      render: ts
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: input
+    id: api-reference
+    attributes:
+      label: Related Assinafy API endpoint(s)
+      placeholder: e.g. POST /accounts/{id}/signers
