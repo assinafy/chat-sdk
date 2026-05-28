@@ -23,6 +23,10 @@ All five layers can be used independently. The top-level `Chat` class composes t
 
 ## Installation
 
+Each release is published to **both** registries.
+
+From npmjs (default):
+
 ```bash
 npm install @assinafy/chat-sdk
 # or
@@ -30,6 +34,16 @@ pnpm add @assinafy/chat-sdk
 # or
 yarn add @assinafy/chat-sdk
 ```
+
+From GitHub Packages — add a project-local `.npmrc` first so the scope resolves there:
+
+```ini
+# .npmrc
+@assinafy:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}
+```
+
+Then `npm install @assinafy/chat-sdk` will pull from GitHub Packages.
 
 Requires Node 20+ (or any runtime with a global `fetch` + `Blob`).
 
