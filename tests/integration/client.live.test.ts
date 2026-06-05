@@ -101,7 +101,14 @@ describeLive("Assinafy API — live sandbox", () => {
     const publicInfo = await client.documents.publicGet(doc.id);
     expect(publicInfo.id).toBe(doc.id);
 
-    const ready = await waitForDocument(doc.id, (d) => (d.pages?.length ?? 0) > 0);
+    // Page images and the `original` artifact are rendered asynchronously by
+    // the metadata pipeline; they are only guaranteed once the document leaves
+    // `metadata_processing`. Wait for a terminal metadata state (plus a page)
+    // before exercising the binary-download endpoints.
+    const ready = await waitForDocument(
+      doc.id,
+      (d) => (d.pages?.length ?? 0) > 0 && d.status !== "uploaded" && d.status !== "metadata_processing",
+    );
     const firstPage = ready.pages![0]!;
     const page = await client.documents.downloadPage(doc.id, firstPage.id);
     expect(page.ok).toBe(true);
@@ -214,7 +221,11 @@ describeLive("Assinafy API — live sandbox", () => {
     if (templates.data.length === 0) return;
 
     const template = templates.data[0]!;
-    const role = template.roles?.[0];
+
+    const detail = await client.templates.get(env!.accountId, template.id);
+    expect(detail.id).toBe(template.id);
+
+    const role = detail.roles?.[0];
     if (!role) return;
 
     const estimate = await client.templates.estimateCost(env!.accountId, template.id, {

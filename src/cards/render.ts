@@ -101,9 +101,9 @@ function renderElementMarkdown(el: CardElement): string {
     case "image":
       return `![${el.alt ?? ""}](${el.url})`;
     case "table": {
-      const header = `| ${el.headers.join(" | ")} |`;
+      const header = `| ${el.headers.map(escapeTableCell).join(" | ")} |`;
       const sep = `| ${el.headers.map((_, i) => alignTo(el.align?.[i])).join(" | ")} |`;
-      const rows = el.rows.map((r) => `| ${r.join(" | ")} |`).join("\n");
+      const rows = el.rows.map((r) => `| ${r.map(escapeTableCell).join(" | ")} |`).join("\n");
       return `${header}\n${sep}\n${rows}`;
     }
     case "select":
@@ -123,6 +123,15 @@ function renderElementMarkdown(el: CardElement): string {
         .map((s) => `- [${s.completed ? "x" : " "}] ${s.name}${s.email ? ` <${s.email}>` : ""}`)
         .join("\n");
   }
+}
+
+/**
+ * Escape a markdown table cell so embedded `|` characters and newlines don't
+ * break the GFM table layout. Pipes are backslash-escaped; newlines become
+ * `<br>` (the only line-break GFM honors inside a cell).
+ */
+function escapeTableCell(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/\|/g, "\\|").replace(/\r?\n/g, "<br>");
 }
 
 function alignTo(a: "left" | "center" | "right" | undefined): string {

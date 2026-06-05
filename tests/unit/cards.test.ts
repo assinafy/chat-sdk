@@ -107,4 +107,13 @@ describe("renderers", () => {
     expect(md).toContain("| --- | ---: |");
     expect(md).toContain("| 1 | 2 |");
   });
+
+  it("escapes pipes and newlines in markdown table cells", () => {
+    const t = Card({
+      children: [Table({ headers: ["A|x", "B"], rows: [["line1\nline2", "a | b"]] })],
+    });
+    const md = renderMarkdown(t);
+    expect(md).toContain("| A\\|x | B |");
+    expect(md).toContain("| line1<br>line2 | a \\| b |");
+  });
 });

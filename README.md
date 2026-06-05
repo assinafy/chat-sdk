@@ -259,8 +259,9 @@ await client.tags.setForDocument(accountId, doc.id, ["important"]);
 
 // Templates
 const tpls = await client.templates.list(accountId);
-const newDoc = await client.templates.instantiate(accountId, tpls.data[0].id, {
-  signers: [{ role_id: "role-id", id: signer.id }],
+const tpl = await client.templates.get(accountId, tpls.data[0].id); // detail incl. roles + default tags
+const newDoc = await client.templates.instantiate(accountId, tpl.id, {
+  signers: [{ role_id: tpl.roles![0].id, id: signer.id }],
 });
 
 // Assignments — connect signers to a document and start the flow.

@@ -116,6 +116,21 @@ describe("AssinafyClient resource paths", () => {
     expect(new URL(requests[1]!.url).searchParams.get("sort")).toBe("-updated_at");
   });
 
+  it("covers template get, instantiate, and estimate-cost paths", async () => {
+    const { client, requests } = makeClient([{}, {}, {}]);
+
+    await client.templates.get("acct", "tpl 1");
+    await client.templates.instantiate("acct", "tpl 1", { signers: [{ role_id: "role1" }] });
+    await client.templates.estimateCost("acct", "tpl 1", [{ role_id: "role1" }]);
+
+    expect(requests.map((r) => `${r.method} ${new URL(r.url).pathname}`)).toEqual([
+      "GET /v1/accounts/acct/templates/tpl%201",
+      "POST /v1/accounts/acct/templates/tpl%201/documents",
+      "POST /v1/accounts/acct/templates/tpl%201/documents/estimate-cost",
+    ]);
+    expect(requests[2]!.body).toEqual({ signers: [{ role_id: "role1" }] });
+  });
+
   it("covers field CRUD and validation endpoint shapes", async () => {
     const { client, requests } = makeClient([{}, [], {}, {}, {}, {}, [], []]);
 

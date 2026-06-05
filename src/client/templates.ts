@@ -18,6 +18,8 @@ import type {
 
 const paths = {
   collection: (accountId: string) => `/accounts/${encodeURIComponent(accountId)}/templates`,
+  item: (accountId: string, templateId: string) =>
+    `/accounts/${encodeURIComponent(accountId)}/templates/${encodeURIComponent(templateId)}`,
   instantiate: (accountId: string, templateId: string) =>
     `/accounts/${encodeURIComponent(accountId)}/templates/${encodeURIComponent(templateId)}/documents`,
   estimate: (accountId: string, templateId: string) =>
@@ -48,6 +50,14 @@ export class TemplatesResource {
         "per-page": query.perPage,
       }),
     );
+  }
+
+  /**
+   * Fetch a single template by id. Unlike {@link list}, the detail response
+   * includes `default_document_tags` and the full page/field/role layout.
+   */
+  get(accountId: string, templateId: string): Promise<Template> {
+    return this.http.get<Template>(paths.item(accountId, templateId));
   }
 
   /** Instantiate a template into a new document with concrete signers. */

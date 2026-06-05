@@ -205,6 +205,30 @@ describe("toAiMessages", () => {
     expect(ai[0]!.content).toContain("Attachments:");
     expect(ai[0]!.content).toContain("x.pdf");
   });
+
+  it("sanitizes display names to the charset OpenAI accepts for `name`", () => {
+    const ai = toAiMessages([
+      {
+        id: "m1",
+        threadId: "t",
+        text: "hi",
+        from: { id: "u1", displayName: "Test User (Acct #2)" },
+        sentAt: new Date(),
+        raw: null,
+      },
+      {
+        id: "m2",
+        threadId: "t",
+        text: "yo",
+        from: { id: "u2", displayName: "***" },
+        sentAt: new Date(),
+        raw: null,
+      },
+    ]);
+    expect(ai[0]!.name).toBe("Test_User_Acct_2");
+    expect(/^[a-zA-Z0-9_-]+$/.test(ai[0]!.name!)).toBe(true);
+    expect(ai[1]!.name).toBeUndefined();
+  });
 });
 
 describe("defaultSystemPrompt", () => {

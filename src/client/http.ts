@@ -63,7 +63,7 @@ export interface ResponseWithMeta<T> {
   headers: Headers;
 }
 
-const DEFAULT_USER_AGENT = "@assinafy/chat-sdk/0.1.0";
+const DEFAULT_USER_AGENT = "@assinafy/chat-sdk/1.0.0";
 const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 
 /**

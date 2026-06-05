@@ -32,9 +32,22 @@ export function toAiMessages(history: IncomingMessage[], botUserId?: string): Ai
     return {
       role: isBot ? "assistant" : "user",
       content,
-      name: author.displayName,
+      name: sanitizeName(author.displayName),
     };
   });
+}
+
+/**
+ * Coerce a display name into the character set OpenAI accepts for the message
+ * `name` field (`^[a-zA-Z0-9_-]+$`). Spaces and other disallowed characters
+ * become underscores; an empty or all-invalid name returns `undefined` so the
+ * field is omitted rather than sent as an invalid value. Anthropic ignores the
+ * field, so this is safe for both providers.
+ */
+function sanitizeName(displayName: string | undefined): string | undefined {
+  if (!displayName) return undefined;
+  const safe = displayName.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
+  return safe.length > 0 ? safe : undefined;
 }
 
 /**
