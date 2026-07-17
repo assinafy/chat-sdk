@@ -71,6 +71,7 @@ export {
   type AuthStrategy,
   type HttpClientOptions,
   type ResponseWithMeta,
+  AccountsResource,
   AuthResource,
   SignersResource,
   DocumentsResource,
@@ -82,5 +83,6 @@ export {
   WebhooksResource,
   type ListTemplatesQuery,
   type SignatureType,
+  type UploadAccountLogoInput,
 } from "./client/index.js";
 export type * from "./client/types.js";

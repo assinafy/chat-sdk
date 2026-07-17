@@ -20,6 +20,7 @@
  * ```
  */
 
+import { AccountsResource } from "./accounts.js";
 import { AssignmentsResource } from "./assignments.js";
 import { AuthResource } from "./auth.js";
 import { DocumentsResource } from "./documents.js";
@@ -36,6 +37,7 @@ export * from "./errors.js";
 export * from "./types.js";
 export { HttpClient, withQuery } from "./http.js";
 export type { AuthStrategy, HttpClientOptions, ResponseWithMeta } from "./http.js";
+export { AccountsResource, type UploadAccountLogoInput } from "./accounts.js";
 export { AuthResource } from "./auth.js";
 export { SignersResource } from "./signers.js";
 export { DocumentsResource } from "./documents.js";
@@ -90,6 +92,7 @@ export class AssinafyClient {
   /** Optional default account id, mirrored from constructor options. */
   readonly accountId: string | undefined;
 
+  readonly accounts: AccountsResource;
   readonly auth: AuthResource;
   readonly signers: SignersResource;
   readonly documents: DocumentsResource;
@@ -111,6 +114,7 @@ export class AssinafyClient {
       onRateLimit: options.onRateLimit,
     });
     this.accountId = options.accountId;
+    this.accounts = new AccountsResource(this.http);
     this.auth = new AuthResource(this.http);
     this.signers = new SignersResource(this.http);
     this.documents = new DocumentsResource(this.http);

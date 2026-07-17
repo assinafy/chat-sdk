@@ -251,6 +251,54 @@ export function createChatTools(
     }),
 
     schemaTool({
+      name: "rename_document",
+      description:
+        "Rename a document. Only allowed before any assignment exists (status `uploaded`/`metadata_ready`).",
+      schema: {
+        type: "object",
+        properties: { documentId: { type: "string" }, name: { type: "string" } },
+        required: ["documentId", "name"],
+      },
+      execute: async (args: { documentId: string; name: string }) =>
+        client.documents.rename(args.documentId, args.name),
+    }),
+
+    schemaTool({
+      name: "search_documents",
+      description:
+        "Lightweight document search under an account (compact results; cheaper than list_documents).",
+      schema: {
+        type: "object",
+        properties: {
+          accountId: accountIdSchema,
+          search: { type: "string" },
+          status: {
+            anyOf: [
+              { type: "string", enum: DOCUMENT_STATUS_CODES },
+              { type: "array", items: { type: "string", enum: DOCUMENT_STATUS_CODES } },
+            ],
+          },
+          page: { type: "integer", minimum: 1 },
+          perPage: { type: "integer", minimum: 1, maximum: 200 },
+        },
+        required: accountIdRequired ? ["accountId"] : [],
+      },
+      execute: async (args: {
+        accountId?: string;
+        search?: string;
+        status?: DocumentStatusCode | DocumentStatusCode[];
+        page?: number;
+        perPage?: number;
+      }) =>
+        client.documents.search(accountIdOrDefault(args.accountId), {
+          search: args.search,
+          status: args.status,
+          page: args.page,
+          perPage: args.perPage,
+        }),
+    }),
+
+    schemaTool({
       name: "list_document_statuses",
       description: "List the canonical document status codes the API recognizes.",
       schema: { type: "object", properties: {}, required: [] },
@@ -744,6 +792,13 @@ export function createChatTools(
         required: ["signatureHash"],
       },
       execute: async (args: { signatureHash: string }) => client.documents.verify(args.signatureHash),
+    }),
+
+    schemaTool({
+      name: "list_accounts",
+      description: "List the workspace accounts the authenticated principal belongs to.",
+      schema: { type: "object", properties: {}, required: [] },
+      execute: async () => client.accounts.list(),
     }),
   ];
 

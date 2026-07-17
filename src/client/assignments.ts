@@ -10,12 +10,15 @@ import type {
   Assignment,
   CostEstimate,
   CreateAssignmentInput,
+  ListAssignmentsQuery,
+  Page,
   ResendCostEstimate,
   ResendNotificationResult,
   WhatsAppNotification,
 } from "./types.js";
 
 const paths = {
+  list: () => `/assignments`,
   collection: (documentId: string) => `/documents/${encodeURIComponent(documentId)}/assignments`,
   estimate: (documentId: string) =>
     `/documents/${encodeURIComponent(documentId)}/assignments/estimate-cost`,
@@ -37,11 +40,27 @@ export class AssignmentsResource {
   constructor(private readonly http: HttpClient) {}
 
   /**
+   * List the assignments belonging to the authenticated user's **current
+   * account**.
+   *
+   * Note: the API derives the account from a user session, so this endpoint
+   * requires a bearer access token. Requests authenticated with an API key
+   * return `400` (no current-account context); use the per-document assignment
+   * data on {@link DocumentsResource.get} in that case.
+   */
+  list(query: ListAssignmentsQuery = {}): Promise<Page<Assignment>> {
+    return this.http.getPage<Assignment>(
+      withQuery(paths.list(), { page: query.page, "per-page": query.perPage }),
+    );
+  }
+
+  /**
    * Create an assignment, attaching one or more signers to a document.
    *
-   * Prefer `signers: [{ id }]` so verification and notification methods can
-   * be configured per signer. The SDK also accepts the older `signerIds`
-   * convenience alias and sends it to the API as `signer_ids`.
+   * Prefer `signers: [{ id }]` so verification and notification methods can be
+   * configured per signer. The `signerIds` / `signer_ids` convenience aliases
+   * are expanded into `signers: [{ id }]` (the API's documented field) before
+   * sending.
    */
   create(documentId: string, input: CreateAssignmentInput): Promise<Assignment> {
     return this.http.post<Assignment>(paths.collection(documentId), normalizeAssignmentInput(input));
@@ -70,16 +89,15 @@ export class AssignmentsResource {
     return this.http.post<ResendCostEstimate>(paths.signerResendEstimate(documentId, assignmentId, signerId));
   }
 
-  /** Reset or extend an assignment expiration date. */
-  resetExpiration(
-    documentId: string,
-    assignmentId: string,
-    expiresAt?: string,
-  ): Promise<Assignment> {
-    return this.http.put<Assignment>(
-      paths.resetExpiration(documentId, assignmentId),
-      expiresAt ? { expires_at: expiresAt } : undefined,
-    );
+  /**
+   * Reset (extend) an assignment's expiration date. `expiresAt` must be an
+   * ISO 8601 date-time — the API rejects the request with `400` if it is
+   * omitted.
+   */
+  resetExpiration(documentId: string, assignmentId: string, expiresAt: string): Promise<Assignment> {
+    return this.http.put<Assignment>(paths.resetExpiration(documentId, assignmentId), {
+      expires_at: expiresAt,
+    });
   }
 
   /** Submit signer-filled field values using a signer access code. */
@@ -114,10 +132,22 @@ export class AssignmentsResource {
   }
 }
 
-function normalizeAssignmentInput(input: CreateAssignmentInput): CreateAssignmentInput {
-  const { signerIds, ...rest } = input;
+/**
+ * Normalize the create/estimate body to the API's documented shape. The API
+ * only recognizes `signers: [{ id, … }]`; a bare `signer_ids` / `signerIds`
+ * array is silently ignored (the request then fails with "at least one signer
+ * is required"). We therefore expand any id array into `signers` entries and
+ * merge them with an explicit `signers` list.
+ */
+function normalizeAssignmentInput(input: CreateAssignmentInput): Record<string, unknown> {
+  const { signerIds, signer_ids, signers, ...rest } = input;
+  const ids = signer_ids ?? signerIds ?? [];
+  const explicit = signers ?? [];
+  const seen = new Set(explicit.map((s) => s.id).filter(Boolean));
+  const fromIds = ids.filter((id) => !seen.has(id)).map((id) => ({ id }));
+  const merged = [...explicit, ...fromIds];
   return {
     ...rest,
-    signer_ids: input.signer_ids ?? signerIds,
+    ...(merged.length > 0 ? { signers: merged } : {}),
   };
 }

@@ -230,14 +230,32 @@ Optional methods (`editMessage`, `deleteMessage`, `addReaction`, `removeReaction
 
 ## The Assinafy client
 
-Every Assinafy v1 endpoint is implemented and typed.
+The client covers the documented Assinafy v1 REST surface — workspace accounts,
+signers, documents, tags, templates, fields, assignments, webhooks, and the
+signer-facing signing flow. Browser-only OAuth redirect endpoints
+(`GET /v1/auth/authenticate`, `GET /v1/login-callback`) are intentionally
+omitted because they are not JSON APIs.
+
+Every response is unwrapped from the API's `{ status, message, data }` envelope,
+so each method returns the `data` payload directly (list methods return
+`{ data, pagination }`).
 
 ```ts
+// Accounts (workspaces)
+const accounts = await client.accounts.list();          // Account[]
+const account = await client.accounts.get(accountId);   // Account
+await client.accounts.update(accountId, { name: "Acme Inc." });
+await client.accounts.getTheme(accountId);               // { account_name, primary_color, secondary_color, logo }
+await client.accounts.uploadLogo(accountId, { filename: "logo.png", body: pngBytes });
+// await client.accounts.create({ name: "New workspace" });
+// await client.accounts.remove(accountId, { force: true });
+
 // Auth
 await client.auth.login({ email, password });
 await client.auth.createApiKey(password);
 await client.auth.getApiKey();
 await client.auth.deleteApiKey();
+await client.auth.linkSocialLogin({ provider: "google", token: "..." });
 
 // Signers
 const page = await client.signers.list(accountId, { search: "alice", perPage: 50 });
@@ -248,7 +266,9 @@ await client.signers.remove(accountId, signer.id);
 // Documents
 const doc = await client.documents.upload(accountId, { filename: "contract.pdf", body: pdfBuffer });
 const docs = await client.documents.list(accountId, { status: "pending_signature" });
+const hits = await client.documents.search(accountId, { search: "contract" }); // lightweight
 for await (const d of client.documents.iterate(accountId)) { /* … */ }
+await client.documents.rename(doc.id, "Renamed.pdf");   // only before signing starts
 await client.documents.activities(doc.id);
 const thumb = await client.documents.thumbnail(doc.id); // Response — stream/buffer as needed
 await client.documents.remove(doc.id);
@@ -271,6 +291,9 @@ const assignment = await client.assignments.create(doc.id, {
   message: "Please sign by Friday.",
 });
 await client.assignments.estimateResendCost(doc.id, assignment.id, signer.id);
+await client.assignments.resetExpiration(doc.id, assignment.id, "2026-12-31T23:59:59Z");
+// assignments.list() needs a bearer token's "current account"; with an API key
+// use the per-document assignment on `client.documents.get(id)` instead.
 
 // Fields
 const field = await client.fields.create(accountId, { type: "text", name: "Reference" });
@@ -282,18 +305,54 @@ await client.webhooks.listEventTypes();
 await client.webhooks.getSubscription(accountId);
 await client.webhooks.listDispatches(accountId, { perPage: 20 });
 
-// Public document and signer flows
+// Public document and signer flows (signer-access-code is sent as a query param)
 await client.documents.publicGet(doc.id);
 await client.documents.sendPublicToken(doc.id, { recipient: "signer@example.com", channel: "email" });
 await client.documents.verify("SIGNATURE_HASH");
 await client.signature.self(accessCode);
+await client.signature.verify(accessCode, "123456");     // OTP; resolves or throws
 await client.signature.acceptTerms(accessCode);
+await client.signature.searchDocuments(signerId, accessCode, "contract");
 await client.signature.upload(accessCode, "signature", pngBytes);
+```
+
+### Response payloads
+
+Responses are already unwrapped from the `{ status, message, data }` envelope.
+Representative shapes (verified against the live sandbox):
+
+```jsonc
+// client.documents.get(id) — a document (assignment is populated on GET, null in list())
+{
+  "id": "103a…", "account_id": "102d…", "template_id": null,
+  "name": "contract.pdf", "status": "pending_signature",
+  "artifacts": { "original": "https://…/download/original", "thumbnail": "https://…/thumbnail" },
+  "is_closed": false, "signing_url": "https://app…/sign/103a…",
+  "tags": [], "pages": [{ "id": "…", "number": 1, "height": 1651, "width": 1275, "download_url": "https://…" }],
+  "assignment": {
+    "id": "…", "sender_email": "you@example.com", "method": "virtual", "expires_at": null,
+    "signers": [{ "id": "…", "full_name": "Alice", "email": "a@x.com", "completed": false,
+                  "verification_method": "Email", "notification_methods": ["Email"], "step": 1 }],
+    "summary": { "signer_count": 1, "completed_count": 0, "signers": [/* … */] },
+    "signing_urls": [{ "signer_id": "…", "url": "https://app…/sign/…?email=a%40x.com" }]
+  },
+  "created_at": "2026-07-17T17:48:53Z", "updated_at": "2026-07-17T17:48:59Z"
+}
+
+// client.assignments.estimateCost(id, …) — a cost estimate
+{
+  "documents": 1, "credits": 0, "needs_extra_document": false, "total_credits": 0,
+  "breakdown": [], "document_balance": 90, "credit_balance": 0,
+  "has_sufficient_resources": true, "blocking_reason": null, "message": null
+}
 ```
 
 ### Pagination
 
-`list()` methods return `{ data, pagination }`. To walk every page, use the matching `iterate()` async iterator.
+`list()` (and `search()`) methods return `{ data, pagination }`, where
+`pagination` is `{ currentPage, pageCount, perPage, totalCount }` read from the
+`X-Pagination-*` response headers. To walk every page, use the matching
+`iterate()` async iterator.
 
 ### Errors
 

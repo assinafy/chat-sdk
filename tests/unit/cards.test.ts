@@ -98,6 +98,33 @@ describe("renderers", () => {
     expect(out).not.toContain("<script>");
   });
 
+  it("neutralizes dangerous URL schemes in html href/src (XSS)", () => {
+    const dangerous = Card({
+      children: [
+        Actions([LinkButton({ label: "x", url: "javascript:alert(1)" })]),
+        LinkButton({ label: "y", url: "JaVaScRiPt:alert(2)" }),
+        DocumentPreview({
+          documentId: "d",
+          name: "n",
+          status: "pending_signature",
+          thumbnailUrl: "data:text/html,<script>",
+          signingUrl: "https://ok.example/sign",
+        }),
+      ],
+    });
+    const out = renderHtml(dangerous);
+    expect(out).not.toContain("javascript:");
+    expect(out).not.toContain("data:text/html");
+    expect(out).toContain('href="#"');
+    // Legitimate https URLs are preserved.
+    expect(out).toContain('href="https://ok.example/sign"');
+  });
+
+  it("keeps safe http/https/mailto URLs intact", () => {
+    const safe = Card({ children: [Actions([LinkButton({ label: "mail", url: "mailto:a@x.com" })])] });
+    expect(renderHtml(safe)).toContain('href="mailto:a@x.com"');
+  });
+
   it("renders tables in markdown", () => {
     const t = Card({
       children: [Table({ headers: ["A", "B"], rows: [["1", "2"]], align: ["left", "right"] })],

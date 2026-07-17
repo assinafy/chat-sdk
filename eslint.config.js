@@ -5,11 +5,11 @@ import tsparser from "@typescript-eslint/parser";
 
 export default [
   {
-    ignores: ["dist/**", "node_modules/**", "coverage/**", "examples/**"],
+    ignores: ["dist/**", "node_modules/**", "coverage/**"],
   },
   js.configs.recommended,
   {
-    files: ["src/**/*.ts", "tests/**/*.ts"],
+    files: ["src/**/*.ts", "tests/**/*.ts", "examples/**/*.ts"],
     languageOptions: {
       parser: tsparser,
       parserOptions: {

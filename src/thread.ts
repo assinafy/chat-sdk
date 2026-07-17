@@ -6,6 +6,7 @@
 
 import type { ChatAdapter, IncomingMessage, OutgoingMessage, SentMessage } from "./adapters/base.js";
 import type { Card, MessageBody } from "./cards/types.js";
+import { isCard } from "./cards/types.js";
 import type { ChatState } from "./state/base.js";
 
 /** What handlers can `post()` — strings, cards, or the structured body. */
@@ -84,7 +85,7 @@ export class Thread implements ThreadLike {
 
 function normalize(body: PostInput): OutgoingMessage {
   if (typeof body === "string") return { text: body };
-  if ("type" in body && body.type === "card") return { card: body as Card };
+  if (isCard(body)) return { card: body };
   const obj = body as Exclude<MessageBody, string | Card>;
   return {
     text: obj.text,

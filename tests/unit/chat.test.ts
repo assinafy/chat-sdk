@@ -64,6 +64,28 @@ describe("Chat", () => {
     expect(hits).toEqual(["Hello WORLD"]);
   });
 
+  it("matches a global (/g) regex deterministically across repeated messages", async () => {
+    const hits: string[] = [];
+    // A `/g` regex is stateful via lastIndex; without a reset the 2nd identical
+    // message would intermittently miss.
+    chat.onNewMessage(/status/g, async (_, msg) => {
+      hits.push(msg.text);
+    });
+    await adapter.receive({ text: "status one" });
+    await adapter.receive({ text: "status two" });
+    await adapter.receive({ text: "status three" });
+    expect(hits).toEqual(["status one", "status two", "status three"]);
+  });
+
+  it("whenReady() resolves after adapters initialize", async () => {
+    const c = new Chat({
+      userName: "ready-bot",
+      adapters: { memory: createMemoryAdapter() },
+      state: new MemoryStateAdapter(),
+    });
+    await expect(c.whenReady()).resolves.toBeUndefined();
+  });
+
   it("openThread + post(Card(...)) round-trip", async () => {
     const thread = await chat.openThread("alice@example.com");
     await thread.post(Card({ title: "Hi", children: [Text("body")] }));

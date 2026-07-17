@@ -38,6 +38,54 @@ export interface RateLimit {
 }
 
 // ---------------------------------------------------------------------------
+// Accounts
+// ---------------------------------------------------------------------------
+
+/** Who signers see as the notification sender for a workspace's documents. */
+export type NotificationSenderType = "User" | "Account" | (string & {});
+
+/** A workspace account (organization). */
+export interface Account {
+  resource?: string;
+  id: string;
+  name: string;
+  primary_color?: string | null;
+  secondary_color?: string | null;
+  notification_sender_type?: NotificationSenderType;
+  roles?: string[];
+  is_delete_allowed?: boolean;
+  created_at: string;
+}
+
+/** Account theme (branding name, colors, logo URL). */
+export interface AccountTheme {
+  account_name: string;
+  primary_color: string | null;
+  secondary_color: string | null;
+  logo: string | null;
+}
+
+/** Create-account request. */
+export interface CreateAccountInput {
+  name: string;
+  notification_sender_type?: NotificationSenderType;
+}
+
+/** Update-account request. */
+export interface UpdateAccountInput {
+  name?: string;
+  notification_sender_type?: NotificationSenderType;
+}
+
+/**
+ * Delete-account request. When `force` is `true`, an active paid subscription
+ * is cancelled automatically and the workspace is deleted immediately.
+ */
+export interface DeleteAccountInput {
+  force?: boolean;
+}
+
+// ---------------------------------------------------------------------------
 // Auth
 // ---------------------------------------------------------------------------
 
@@ -60,6 +108,12 @@ export interface SocialLoginInput {
   provider: string;
   token: string | Record<string, unknown>;
   has_accepted_terms: boolean;
+}
+
+/** Link-social-login request. Attaches a provider account to the current user. */
+export interface LinkSocialLoginInput {
+  provider: "google" | (string & {});
+  token: string;
 }
 
 /** API key payload returned by create/get API-key endpoints. */
@@ -133,10 +187,17 @@ export interface ListSignersQuery {
   perPage?: number;
 }
 
-/** Signer data-confirmation request. */
+/**
+ * Signer data-confirmation request. The documented body accepts `full_name`,
+ * `email`, and `government_id`; `whatsapp_phone_number` and `has_accepted_terms`
+ * are retained for callers that relied on them but are not part of the
+ * documented contract.
+ */
 export interface SignerSelfConfirmDataInput {
   full_name?: string;
   email?: string;
+  /** Government identification number (e.g. CPF). */
+  government_id?: string;
   whatsapp_phone_number?: string;
   has_accepted_terms?: boolean;
 }
@@ -291,6 +352,23 @@ export interface ListDocumentsQuery {
 
 /** Query accepted by signer-facing document lists. */
 export interface ListSignerDocumentsQuery extends ListDocumentsQuery {}
+
+/**
+ * Query accepted by the lightweight document-search endpoint. The search
+ * endpoint returns a compact document representation (no expanded
+ * assignment/pages).
+ */
+export interface SearchDocumentsQuery {
+  search?: string;
+  status?: DocumentStatusCode | DocumentStatusCode[];
+  page?: number;
+  perPage?: number;
+}
+
+/** Document rename request. */
+export interface RenameDocumentInput {
+  name: string;
+}
 
 /** Input for uploading a document via multipart/form-data. */
 export interface UploadDocumentInput {
@@ -498,6 +576,12 @@ export interface CreateAssignmentInput {
   copy_receivers?: string[];
 }
 
+/** Query accepted by the assignment list endpoint. */
+export interface ListAssignmentsQuery {
+  page?: number;
+  perPage?: number;
+}
+
 /** Resend notification response. */
 export interface ResendNotificationResult {
   is_sent: boolean;
@@ -632,8 +716,14 @@ export interface WebhookSubscriptionInput {
   email: string;
 }
 
-/** Webhook subscription response. */
-export interface WebhookSubscription extends WebhookSubscriptionInput {
+/**
+ * Webhook subscription response. `url`/`email` are nullable in the API when a
+ * subscription record exists but has not been fully configured, so they are
+ * widened from the non-null request shape.
+ */
+export interface WebhookSubscription extends Omit<WebhookSubscriptionInput, "url" | "email"> {
+  url: string | null;
+  email: string | null;
   id?: string;
   created_at?: string;
   updated_at?: string;
@@ -657,8 +747,10 @@ export interface WebhookDispatch {
   http_status: number | null;
   response_body: string | null;
   error: string | null;
-  created_at: number;
-  updated_at?: number;
+  /** ISO 8601 date-time. (The nested `payload` may carry unix timestamps, but the row itself is a string.) */
+  created_at: string;
+  /** ISO 8601 date-time. */
+  updated_at?: string;
 }
 
 /** Webhook dispatch list query. */

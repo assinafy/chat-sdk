@@ -28,6 +28,8 @@ const paths = {
   sign: () => "/sign",
   signerDocument: (signerId: string) => `/signers/${encodeURIComponent(signerId)}/document`,
   signerDocuments: (signerId: string) => `/signers/${encodeURIComponent(signerId)}/documents`,
+  signerDocumentsSearch: (signerId: string) =>
+    `/signers/${encodeURIComponent(signerId)}/documents/search`,
   signerDownload: (signerId: string, documentId: string, artifact: string) =>
     `/signers/${encodeURIComponent(signerId)}/documents/${encodeURIComponent(documentId)}/download/${encodeURIComponent(artifact)}`,
   signMultiple: () => "/signers/documents/sign-multiple",
@@ -46,33 +48,41 @@ export class SignatureResource {
     return this.http.get<Signer>(withQuery(paths.self(), { "signer-access-code": accessCode }));
   }
 
-  /** Accept the signer terms of use. */
+  /**
+   * Accept the signer terms of use. The signer is identified by the
+   * `signer-access-code` query parameter (the endpoint's sole credential).
+   */
   async acceptTerms(accessCode: string): Promise<void> {
-    await this.http.put<unknown>(paths.acceptTerms(), { "signer-access-code": accessCode });
+    await this.http.put<unknown>(withQuery(paths.acceptTerms(), { "signer-access-code": accessCode }));
   }
 
-  /** Verify a one-time code that was sent to the signer (email/SMS). */
-  verify(accessCode: string, verificationCode: string): Promise<{ verified: boolean } & Record<string, unknown>> {
-    return this.http.post<{ verified: boolean } & Record<string, unknown>>(paths.verify(), {
-      "signer-access-code": accessCode,
-      "verification-code": verificationCode,
-    });
+  /**
+   * Verify the one-time code (OTP) sent to the signer to unlock the signing
+   * flow. Throws {@link ApiError} on an invalid code; resolves on success.
+   */
+  async verify(accessCode: string, verificationCode: string): Promise<void> {
+    await this.http.post<unknown>(
+      withQuery(paths.verify(), { "signer-access-code": accessCode }),
+      { "verification-code": verificationCode },
+    );
   }
 
   /**
    * Upload a signature image (PNG/JPEG) for the signer.
    *
    * The `type` query parameter discriminates signature, rubric, or initials.
+   * Pass `reuse: true` to reuse the previously stored image of that type.
    */
   async upload(
     accessCode: string,
     type: SignatureType,
     image: Blob | ArrayBuffer | Uint8Array,
     contentType = "image/png",
+    reuse?: boolean,
   ): Promise<void> {
     const body = image instanceof Blob ? image : new Blob([toBlobPart(image)], { type: contentType });
     await this.http.request<unknown>(
-      withQuery(paths.upload(), { "signer-access-code": accessCode, type }),
+      withQuery(paths.upload(), { "signer-access-code": accessCode, type, reuse }),
       {
         method: "POST",
         body,
@@ -121,6 +131,23 @@ export class SignatureResource {
         tags: csv(query.tags),
         page: query.page,
         "per-page": query.perPage,
+      }),
+    );
+  }
+
+  /**
+   * Lightweight search over the documents a signer is party to. Returns a
+   * compact document representation.
+   */
+  searchDocuments(
+    signerId: string,
+    accessCode: string,
+    search?: string,
+  ): Promise<Page<Document>> {
+    return this.http.getPage<Document>(
+      withQuery(paths.signerDocumentsSearch(signerId), {
+        "signer-access-code": accessCode,
+        search,
       }),
     );
   }

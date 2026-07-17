@@ -77,29 +77,47 @@ describe("AssinafyClient resource paths", () => {
     ]);
   });
 
-  it("normalizes assignment signerIds to signer_ids and covers assignment actions", async () => {
-    const { client, requests } = makeClient([{}, {}, {}, {}, []]);
+  it("expands assignment signerIds/signer_ids into the documented `signers` array", async () => {
+    const { client, requests } = makeClient([{}, {}, {}]);
 
+    // Both convenience aliases must expand to `signers: [{ id }]` (the only shape
+    // the API honors) and merge with any explicit `signers`.
     await client.assignments.create("doc 1", { method: "virtual", signerIds: ["s1"] });
+    await client.assignments.create("doc 1", { method: "virtual", signer_ids: ["s2", "s3"] });
+    await client.assignments.create("doc 1", {
+      method: "virtual",
+      signers: [{ id: "s1", step: 1 }],
+      signer_ids: ["s1", "s2"],
+    });
+
+    expect(requests[0]!.body).toEqual({ method: "virtual", signers: [{ id: "s1" }] });
+    expect(requests[1]!.body).toEqual({ method: "virtual", signers: [{ id: "s2" }, { id: "s3" }] });
+    // Explicit signers win; ids already present are not duplicated.
+    expect(requests[2]!.body).toEqual({
+      method: "virtual",
+      signers: [{ id: "s1", step: 1 }, { id: "s2" }],
+    });
+  });
+
+  it("covers assignment resend, resend-estimate, reset-expiration, and notifications", async () => {
+    const { client, requests } = makeClient([{}, {}, {}, []]);
+
     await client.assignments.resendToSigner("doc 1", "asn 1", "s1");
     await client.assignments.estimateResendCost("doc 1", "asn 1", "s1");
     await client.assignments.resetExpiration("doc 1", "asn 1", "2030-08-03T21:00:00Z");
     await client.assignments.whatsappNotifications("doc 1", "asn 1");
 
-    expect(requests[0]!.method).toBe("POST");
-    expect(new URL(requests[0]!.url).pathname).toBe("/v1/documents/doc%201/assignments");
-    expect(requests[0]!.body).toEqual({ method: "virtual", signer_ids: ["s1"] });
-    expect(requests[1]!.method).toBe("PUT");
-    expect(new URL(requests[1]!.url).pathname).toBe("/v1/documents/doc%201/assignments/asn%201/signers/s1/resend");
-    expect(requests[2]!.method).toBe("POST");
-    expect(new URL(requests[2]!.url).pathname).toBe(
+    expect(requests[0]!.method).toBe("PUT");
+    expect(new URL(requests[0]!.url).pathname).toBe("/v1/documents/doc%201/assignments/asn%201/signers/s1/resend");
+    expect(requests[1]!.method).toBe("POST");
+    expect(new URL(requests[1]!.url).pathname).toBe(
       "/v1/documents/doc%201/assignments/asn%201/signers/s1/estimate-resend-cost",
     );
-    expect(requests[3]!.method).toBe("PUT");
-    expect(new URL(requests[3]!.url).pathname).toBe("/v1/documents/doc%201/assignments/asn%201/reset-expiration");
-    expect(requests[3]!.body).toEqual({ expires_at: "2030-08-03T21:00:00Z" });
-    expect(requests[4]!.method).toBe("GET");
-    expect(new URL(requests[4]!.url).pathname).toBe(
+    expect(requests[2]!.method).toBe("PUT");
+    expect(new URL(requests[2]!.url).pathname).toBe("/v1/documents/doc%201/assignments/asn%201/reset-expiration");
+    expect(requests[2]!.body).toEqual({ expires_at: "2030-08-03T21:00:00Z" });
+    expect(requests[3]!.method).toBe("GET");
+    expect(new URL(requests[3]!.url).pathname).toBe(
       "/v1/documents/doc%201/assignments/asn%201/whatsapp-notifications",
     );
   });
@@ -205,5 +223,121 @@ describe("AssinafyClient resource paths", () => {
     expect(requests[2]!.body).toEqual({ document_ids: ["doc1", "doc2"] });
     expect(requests[3]!.body).toEqual({ document_ids: ["doc1"], decline_reason: "No" });
     expect(new URL(requests[4]!.url).pathname).toBe("/v1/signers/signer%201/documents/doc%201/download/original");
+  });
+
+  it("covers signers resource CRUD paths and self confirm-data", async () => {
+    const { client, requests } = makeClient([[], {}, {}, {}, {}, {}]);
+
+    await client.signers.list("acct", { search: "alice", perPage: 5 });
+    await client.signers.create("acct", { full_name: "Alice", email: "a@x.com" });
+    await client.signers.get("acct", "s 1");
+    await client.signers.update("acct", "s 1", { full_name: "Alice B" });
+    await client.signers.remove("acct", "s 1");
+    await client.signers.confirmDataForDocument("doc 1", "code", { government_id: "123" });
+
+    expect(requests.map((r) => `${r.method} ${new URL(r.url).pathname}`)).toEqual([
+      "GET /v1/accounts/acct/signers",
+      "POST /v1/accounts/acct/signers",
+      "GET /v1/accounts/acct/signers/s%201",
+      "PUT /v1/accounts/acct/signers/s%201",
+      "DELETE /v1/accounts/acct/signers/s%201",
+      "PUT /v1/documents/doc%201/signers/confirm-data",
+    ]);
+    expect(new URL(requests[0]!.url).searchParams.get("per-page")).toBe("5");
+    expect(new URL(requests[5]!.url).searchParams.get("signer-access-code")).toBe("code");
+    expect(requests[5]!.body).toEqual({ government_id: "123" });
+  });
+
+  it("puts the signer-access-code in the QUERY for acceptTerms and verify (not the body)", async () => {
+    const { client, requests } = makeClient([{}, {}]);
+
+    await client.signature.acceptTerms("the-code");
+    await client.signature.verify("the-code", "123456");
+
+    expect(requests[0]!.method).toBe("PUT");
+    expect(new URL(requests[0]!.url).pathname).toBe("/v1/signers/accept-terms");
+    expect(new URL(requests[0]!.url).searchParams.get("signer-access-code")).toBe("the-code");
+    expect(requests[0]!.body).toBeUndefined();
+
+    expect(requests[1]!.method).toBe("POST");
+    expect(new URL(requests[1]!.url).pathname).toBe("/v1/verify");
+    expect(new URL(requests[1]!.url).searchParams.get("signer-access-code")).toBe("the-code");
+    // The body carries ONLY the verification code — not the access code.
+    expect(requests[1]!.body).toEqual({ "verification-code": "123456" });
+  });
+
+  it("sends the documented {recipient, channel} body for sendPublicToken", async () => {
+    const { client, requests } = makeClient([{}]);
+
+    await client.documents.sendPublicToken("doc 1", { recipient: "a@x.com", channel: "email" });
+
+    expect(requests[0]!.method).toBe("PUT");
+    expect(new URL(requests[0]!.url).pathname).toBe("/v1/public/documents/doc%201/send-token");
+    expect(requests[0]!.body).toEqual({ recipient: "a@x.com", channel: "email" });
+  });
+
+  it("covers document search and rename", async () => {
+    const { client, requests } = makeClient([[], {}]);
+
+    await client.documents.search("acct", { search: "contract", status: "metadata_ready", perPage: 5 });
+    await client.documents.rename("doc 1", "New Name.pdf");
+
+    expect(requests[0]!.method).toBe("GET");
+    expect(new URL(requests[0]!.url).pathname).toBe("/v1/accounts/acct/documents/search");
+    expect(new URL(requests[0]!.url).searchParams.get("search")).toBe("contract");
+    expect(new URL(requests[0]!.url).searchParams.get("status")).toBe("metadata_ready");
+    expect(new URL(requests[0]!.url).searchParams.get("per-page")).toBe("5");
+    expect(requests[1]!.method).toBe("PATCH");
+    expect(new URL(requests[1]!.url).pathname).toBe("/v1/documents/doc%201");
+    expect(requests[1]!.body).toEqual({ name: "New Name.pdf" });
+  });
+
+  it("covers the accounts resource (CRUD, theme, logo, force delete)", async () => {
+    const { client, requests } = makeClient([[], {}, {}, {}, {}, {}, {}]);
+
+    await client.accounts.list();
+    await client.accounts.create({ name: "Acme", notification_sender_type: "Account" });
+    await client.accounts.get("acct");
+    await client.accounts.update("acct", { name: "Acme Inc." });
+    await client.accounts.remove("acct", { force: true });
+    await client.accounts.getTheme("acct");
+    await client.accounts.deleteLogo("acct");
+
+    expect(requests.map((r) => `${r.method} ${new URL(r.url).pathname}`)).toEqual([
+      "GET /v1/accounts",
+      "POST /v1/accounts",
+      "GET /v1/accounts/acct",
+      "PUT /v1/accounts/acct",
+      "DELETE /v1/accounts/acct",
+      "GET /v1/accounts/acct/theme",
+      "DELETE /v1/accounts/acct/logo",
+    ]);
+    expect(requests[1]!.body).toEqual({ name: "Acme", notification_sender_type: "Account" });
+    expect(requests[4]!.body).toEqual({ force: true });
+  });
+
+  it("covers assignments.list and auth.linkSocialLogin", async () => {
+    const { client, requests } = makeClient([[], {}]);
+
+    await client.assignments.list({ perPage: 10 });
+    await client.auth.linkSocialLogin({ provider: "google", token: "tok" });
+
+    expect(requests[0]!.method).toBe("GET");
+    expect(new URL(requests[0]!.url).pathname).toBe("/v1/assignments");
+    expect(new URL(requests[0]!.url).searchParams.get("per-page")).toBe("10");
+    expect(requests[1]!.method).toBe("POST");
+    expect(new URL(requests[1]!.url).pathname).toBe("/v1/auth/link-social-login");
+    expect(requests[1]!.body).toEqual({ provider: "google", token: "tok" });
+  });
+
+  it("searches signer documents with the access code in the query", async () => {
+    const { client, requests } = makeClient([[]]);
+
+    await client.signature.searchDocuments("signer 1", "code", "contract");
+
+    expect(requests[0]!.method).toBe("GET");
+    expect(new URL(requests[0]!.url).pathname).toBe("/v1/signers/signer%201/documents/search");
+    expect(new URL(requests[0]!.url).searchParams.get("signer-access-code")).toBe("code");
+    expect(new URL(requests[0]!.url).searchParams.get("search")).toBe("contract");
   });
 });

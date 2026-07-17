@@ -243,6 +243,43 @@ describeLive("Assinafy API — live sandbox", () => {
     expect(count).toBeGreaterThanOrEqual(0);
   });
 
+  it("accounts.list / get / getTheme return the configured account", async () => {
+    const accounts = await client.accounts.list();
+    expect(Array.isArray(accounts)).toBe(true);
+    expect(accounts.some((a) => a.id === env!.accountId)).toBe(true);
+
+    const account = await client.accounts.get(env!.accountId);
+    expect(account.id).toBe(env!.accountId);
+    expect(typeof account.name).toBe("string");
+
+    const theme = await client.accounts.getTheme(env!.accountId);
+    expect(typeof theme.account_name).toBe("string");
+  });
+
+  it("documents.search returns a compact page and rename updates the name", async () => {
+    const search = await client.documents.search(env!.accountId, { perPage: 5 });
+    expect(Array.isArray(search.data)).toBe(true);
+    expect(search.pagination.perPage).toBe(5);
+
+    // Rename requires a fresh document that has no assignment yet.
+    const doc = await client.documents.upload(env!.accountId, {
+      filename: `cs-rename-${Date.now()}.pdf`,
+      body: makeMinimalPdf("rename test"),
+    });
+    cleanup.push(async () => {
+      try {
+        await client.documents.remove(doc.id);
+      } catch {
+        /* ignore */
+      }
+    });
+    const ready = await waitForDocument(doc.id, (d) => d.status === "metadata_ready");
+    expect(ready.status).toBe("metadata_ready");
+
+    const renamed = await client.documents.rename(doc.id, `renamed-${Date.now()}.pdf`);
+    expect(renamed.name).toContain("renamed-");
+  }, 60_000);
+
   it("full happy path: upload + create signers + create assignment + notification actions", async () => {
     // Lookup-or-create makes the test idempotent across runs.
     const a = await ensureSigner(env!.primaryEmail, "Bill M");

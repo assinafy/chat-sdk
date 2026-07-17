@@ -18,6 +18,8 @@ import type {
   ListDocumentsQuery,
   Page,
   PublicDocument,
+  RenameDocumentInput,
+  SearchDocumentsQuery,
   SendPublicTokenInput,
   SendPublicTokenResult,
   UploadDocumentInput,
@@ -26,6 +28,7 @@ import type {
 const paths = {
   statuses: () => `/documents/statuses`,
   collection: (accountId: string) => `/accounts/${encodeURIComponent(accountId)}/documents`,
+  search: (accountId: string) => `/accounts/${encodeURIComponent(accountId)}/documents/search`,
   item: (documentId: string) => `/documents/${encodeURIComponent(documentId)}`,
   download: (documentId: string, artifact: string) =>
     `/documents/${encodeURIComponent(documentId)}/download/${encodeURIComponent(artifact)}`,
@@ -56,6 +59,22 @@ export class DocumentsResource {
         search: query.search,
         tags: csv(query.tags),
         sort: query.sort,
+        page: query.page,
+        "per-page": query.perPage,
+      }),
+    );
+  }
+
+  /**
+   * Lightweight document search. Returns a compact document representation
+   * (no expanded assignment/pages) — cheaper than {@link list} when you only
+   * need to resolve names/ids.
+   */
+  search(accountId: string, query: SearchDocumentsQuery = {}): Promise<Page<Document>> {
+    return this.http.getPage<Document>(
+      withQuery(paths.search(accountId), {
+        search: query.search,
+        status: query.status,
         page: query.page,
         "per-page": query.perPage,
       }),
@@ -100,6 +119,17 @@ export class DocumentsResource {
   /** Fetch a single document by id. */
   get(documentId: string): Promise<Document> {
     return this.http.get<Document>(paths.item(documentId));
+  }
+
+  /**
+   * Rename a document. Only allowed before any assignment exists (status
+   * `uploaded` or `metadata_ready` with no signers); once the signature process
+   * has started or the document is certificated, the name is locked. The API
+   * normalizes the name (diacritics removed, unsupported characters replaced
+   * with dashes).
+   */
+  rename(documentId: string, name: string): Promise<Document> {
+    return this.http.patch<Document>(paths.item(documentId), { name } satisfies RenameDocumentInput);
   }
 
   /** Delete a document. Only available when its current status is `deletable`. */

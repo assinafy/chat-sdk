@@ -54,8 +54,8 @@ export interface IncomingMessage {
    * pointing at the same object.
    */
   author: Identity;
-  /** @deprecated Use {@link author}. Kept for backwards compatibility. */
-  from: Identity;
+  /** @deprecated Use {@link author}. Populated by the SDK for backwards compatibility. */
+  from?: Identity;
   /** Whether this message explicitly mentions the bot. */
   isMention: boolean;
   /** @deprecated Use {@link isMention}. Kept for backwards compatibility. */
@@ -78,8 +78,8 @@ export interface IncomingAction {
   value?: string;
   /** Who clicked / typed it. */
   author: Identity;
-  /** @deprecated Use {@link author}. */
-  from: Identity;
+  /** @deprecated Use {@link author}. Populated by the SDK for backwards compatibility. */
+  from?: Identity;
   sentAt: Date;
   raw: unknown;
 }
