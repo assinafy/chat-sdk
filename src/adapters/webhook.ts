@@ -57,6 +57,12 @@ export function verifyWebhookSignature(options: VerifyWebhookSignatureOptions): 
   const encoding = options.encoding ?? "hex";
   const tolerance = options.toleranceSeconds ?? 300;
 
+  // An empty secret makes every signature derivable by an attacker, so a
+  // misconfigured secret must fail closed rather than "verify" forged requests.
+  if (!options.secret) {
+    throw new WebhookSignatureError("Webhook secret is missing or empty");
+  }
+
   if (options.timestamp !== undefined) {
     const ts = Number(options.timestamp);
     if (!Number.isFinite(ts)) {
@@ -104,8 +110,15 @@ function defaultPayload(
 ): string | Uint8Array {
   if (timestamp === undefined) return body;
   // Slack/Stripe style: `${timestamp}.${body}`.
-  const bodyText = typeof body === "string" ? body : new TextDecoder().decode(body);
-  return `${timestamp}.${bodyText}`;
+  if (typeof body === "string") return `${timestamp}.${body}`;
+  // Binary body: prepend `${timestamp}.` as bytes so the raw payload the sender
+  // signed is preserved exactly (a UTF-8 decode/re-encode round-trip would
+  // corrupt non-UTF-8 bytes and break verification).
+  const prefix = new TextEncoder().encode(`${timestamp}.`);
+  const out = new Uint8Array(prefix.length + body.length);
+  out.set(prefix, 0);
+  out.set(body, prefix.length);
+  return out;
 }
 
 function toBytes(payload: string | Uint8Array): Uint8Array {

@@ -20,7 +20,11 @@ export class ApiError extends AssinafyError {
   override readonly name = "ApiError";
   /** HTTP status code returned by the API. */
   readonly status: number;
-  /** The unwrapped response body, if any. */
+  /**
+   * The parsed error response body. For Assinafy errors this is the full
+   * `{ status, message, data }` envelope (with `data: null`); for non-JSON
+   * responses it is the raw text.
+   */
   readonly body: unknown;
   /** The path that was requested. */
   readonly path: string;

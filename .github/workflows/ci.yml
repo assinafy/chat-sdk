@@ -25,15 +25,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ["20", "22"]
+        # Node 20 = compatibility floor (engines >=20, EOL Apr 2026);
+        # 22 = maintenance LTS; 24 = active LTS.
+        node: ["20", "22", "24"]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           persist-credentials: false
 
       - name: Use Node.js ${{ matrix.node }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ matrix.node }}
           cache: npm
@@ -44,8 +46,11 @@ jobs:
       - name: Verify package signatures
         run: npm audit signatures
 
-      - name: Typecheck
+      - name: Typecheck (src)
         run: npm run typecheck
+
+      - name: Typecheck (tests)
+        run: npm run typecheck:tests
 
       - name: Lint
         run: npm run lint --if-present
@@ -56,9 +61,9 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Upload dist (Node 20 only)
-        if: matrix.node == '20'
-        uses: actions/upload-artifact@v4
+      - name: Upload dist (Node 22 only)
+        if: matrix.node == '22'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: dist
           path: dist
@@ -75,14 +80,14 @@ jobs:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           persist-credentials: false
 
-      - name: Use Node.js 20
-        uses: actions/setup-node@v4
+      - name: Use Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
 
       - name: Install dependencies
@@ -117,11 +122,12 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           persist-credentials: false
 
       - name: Run actionlint
-        uses: docker://rhysd/actionlint:latest
+        # Pinned version (not :latest) for reproducible, supply-chain-safe runs.
+        uses: docker://rhysd/actionlint:1.7.12
         with:
           args: -color

@@ -83,9 +83,8 @@ export class SignersResource {
    * Public flow: confirm/update signer data using a `signer-access-code`.
    * Used by the embeddable signer UI before the signer signs.
    *
-   * Pass `has_accepted_terms: true` in `input` to confirm data and accept the
-   * terms of use in a single request (the API also exposes a standalone
-   * accept-terms endpoint on {@link SignatureResource.acceptTerms}).
+   * The documented body fields are `full_name`, `email`, and `government_id`.
+   * To accept the terms of use, call {@link SignatureResource.acceptTerms}.
    */
   confirmDataForDocument(
     documentId: string,

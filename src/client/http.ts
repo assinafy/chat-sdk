@@ -33,8 +33,8 @@ export interface HttpClientOptions {
    */
   fetch?: typeof fetch;
   /**
-   * Number of times to retry transient failures (429, 502, 503, 504).
-   * Defaults to 2 (so up to 3 total attempts).
+   * Number of times to retry transient failures (HTTP 408, 425, 429, 500, 502,
+   * 503, 504, plus network errors). Defaults to 2 (so up to 3 total attempts).
    */
   maxRetries?: number;
   /**
@@ -63,7 +63,15 @@ export interface ResponseWithMeta<T> {
   headers: Headers;
 }
 
-const DEFAULT_USER_AGENT = "@assinafy/chat-sdk/1.0.0";
+/**
+ * SDK version, injected at build time from package.json by tsup (see
+ * `tsup.config.ts`). The literal fallback keeps un-bundled usage (e.g. running
+ * the TypeScript sources directly) working; the build replaces it so the
+ * User-Agent never drifts from the published version.
+ */
+declare const __SDK_VERSION__: string | undefined;
+const VERSION = typeof __SDK_VERSION__ !== "undefined" ? __SDK_VERSION__ : "1.1.0";
+const DEFAULT_USER_AGENT = `@assinafy/chat-sdk/${VERSION}`;
 const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 
 /**
@@ -120,6 +128,11 @@ export class HttpClient {
   /** Convenience: PUT with a JSON body. */
   put<T>(path: string, body?: unknown, init: RequestInit = {}): Promise<T> {
     return this.request<T>(path, withJsonBody(init, "PUT", body)).then((r) => r.data);
+  }
+
+  /** Convenience: PATCH with a JSON body. */
+  patch<T>(path: string, body?: unknown, init: RequestInit = {}): Promise<T> {
+    return this.request<T>(path, withJsonBody(init, "PATCH", body)).then((r) => r.data);
   }
 
   /** Convenience: DELETE that returns just the unwrapped data. */
@@ -271,8 +284,11 @@ export class HttpClient {
     if (headers) {
       const retryAfter = headers.get("retry-after");
       if (retryAfter) {
+        // `Retry-After` may be either a number of seconds or an HTTP-date.
         const seconds = Number(retryAfter);
-        if (Number.isFinite(seconds)) return Math.min(seconds * 1000, 10_000);
+        if (Number.isFinite(seconds)) return Math.min(Math.max(seconds, 0) * 1000, 10_000);
+        const dateMs = Date.parse(retryAfter);
+        if (Number.isFinite(dateMs)) return Math.min(Math.max(dateMs - Date.now(), 0), 10_000);
       }
     }
     return Math.min(this.retryBaseDelayMs * 2 ** attempt, 10_000);

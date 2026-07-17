@@ -70,4 +70,23 @@ describe("verifyWebhookSignature", () => {
     const sig = sign(secret, "");
     expect(verifyWebhookSignature({ secret, body: empty, signature: sig })).toBe(true);
   });
+
+  it("fails closed when the secret is missing or empty", () => {
+    const sig = sign("", body);
+    expect(() => verifyWebhookSignature({ secret: "", body, signature: sig })).toThrow(
+      WebhookSignatureError,
+    );
+    expect(isValidWebhookSignature({ secret: "", body, signature: sig })).toBe(false);
+  });
+
+  it("verifies a binary body with a timestamp without corrupting non-UTF-8 bytes", () => {
+    const ts = Math.floor(Date.now() / 1000);
+    const raw = new Uint8Array([0xff, 0x00, 0xfe, 0x80]); // invalid UTF-8
+    const prefix = new TextEncoder().encode(`${ts}.`);
+    const payload = new Uint8Array(prefix.length + raw.length);
+    payload.set(prefix, 0);
+    payload.set(raw, prefix.length);
+    const sig = createHmac("sha256", secret).update(payload).digest("hex");
+    expect(verifyWebhookSignature({ secret, body: raw, signature: sig, timestamp: ts })).toBe(true);
+  });
 });

@@ -81,7 +81,7 @@ export class Chat implements ChatHandle {
   private newMessageHandlers: PatternHandler[] = [];
   private commandHandlers: PatternHandler[] = [];
   private fallbackHandler?: MessageHandler;
-  private initialized = false;
+  private readonly ready: Promise<void>;
 
   constructor(options: ChatOptions) {
     const adapterNames = Object.keys(options.adapters);
@@ -93,7 +93,19 @@ export class Chat implements ChatHandle {
     this.state = options.state ?? new MemoryStateAdapter();
     this.client = options.client;
     this.defaultAdapter = options.defaultAdapter ?? adapterNames[0]!;
-    void this.initializeAdapters();
+    // Kick off adapter initialization. The promise is awaited by every dispatch
+    // entry point (and exposed via `whenReady()`) so init errors surface rather
+    // than being silently swallowed.
+    this.ready = this.initializeAdapters();
+  }
+
+  /**
+   * Resolves once every adapter's `initialize()` has completed; rejects if any
+   * adapter failed to initialize. Awaiting this is optional — the dispatch
+   * entry points await it internally — but useful for fail-fast startup.
+   */
+  whenReady(): Promise<void> {
+    return this.ready;
   }
 
   // ---------------------------------------------------------------------------
@@ -177,6 +189,7 @@ export class Chat implements ChatHandle {
    * right after they verify the request signature.
    */
   async processMessage(adapter: ChatAdapter, message: IncomingMessage): Promise<void> {
+    await this.ready;
     const thread = new Thread({
       id: message.threadId,
       adapter,
@@ -187,13 +200,13 @@ export class Chat implements ChatHandle {
     // Priority order: slash command > regex onNewMessage > subscribed follow-up
     // > explicit mention > fallback.
     for (const { pattern, handler } of this.commandHandlers) {
-      if (pattern.test(message.text)) {
+      if (matches(pattern, message.text)) {
         await handler(thread, message);
         return;
       }
     }
 
-    const newMessageHits = this.newMessageHandlers.filter((h) => h.pattern.test(message.text));
+    const newMessageHits = this.newMessageHandlers.filter((h) => matches(h.pattern, message.text));
     if (newMessageHits.length > 0) {
       for (const h of newMessageHits) await h.handler(thread, message);
       return;
@@ -217,15 +230,24 @@ export class Chat implements ChatHandle {
 
   /** Adapter entry point: dispatch a normalized inbound action. */
   async processAction(adapter: ChatAdapter, action: IncomingAction): Promise<void> {
+    await this.ready;
     const thread = new Thread({ id: action.threadId, adapter, state: this.state });
     for (const handler of this.actionHandlers) await handler(thread, action);
   }
 
-  /** Gracefully disconnect every adapter that supports it. */
+  /**
+   * Gracefully disconnect every adapter that supports it. Teardown is isolated
+   * per adapter: one failing `disconnect()` does not prevent the others from
+   * running. Rejects with the first error afterwards, if any occurred.
+   */
   async disconnect(): Promise<void> {
-    for (const adapter of Object.values(this.adapters)) {
-      if (typeof adapter.disconnect === "function") await adapter.disconnect();
-    }
+    const results = await Promise.allSettled(
+      Object.values(this.adapters).map((adapter) =>
+        typeof adapter.disconnect === "function" ? adapter.disconnect() : Promise.resolve(),
+      ),
+    );
+    const failure = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
+    if (failure) throw failure.reason;
   }
 
   // ---------------------------------------------------------------------------
@@ -233,8 +255,6 @@ export class Chat implements ChatHandle {
   // ---------------------------------------------------------------------------
 
   private async initializeAdapters(): Promise<void> {
-    if (this.initialized) return;
-    this.initialized = true;
     for (const adapter of Object.values(this.adapters)) {
       await adapter.initialize(this);
     }
@@ -249,4 +269,15 @@ export class Chat implements ChatHandle {
 
 function escapeRegex(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Test a caller-supplied RegExp without the statefulness of the `g`/`y` flags:
+ * `RegExp.prototype.test` advances `lastIndex` for global/sticky patterns,
+ * which would make repeated calls intermittently miss. Resetting first keeps
+ * matching deterministic regardless of the flags the caller used.
+ */
+function matches(pattern: RegExp, text: string): boolean {
+  pattern.lastIndex = 0;
+  return pattern.test(text);
 }

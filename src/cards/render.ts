@@ -182,13 +182,13 @@ function renderElementHtml(el: CardElement): string {
         `</dl>`
       );
     case "link-button":
-      return `<a class="btn btn-${el.style ?? "primary"}" href="${escapeAttr(el.url)}">${escapeHtml(el.label)}</a>`;
+      return `<a class="btn btn-${escapeAttr(el.style ?? "primary")}" href="${escapeUrlAttr(el.url)}">${escapeHtml(el.label)}</a>`;
     case "button":
       return `<button data-action-id="${escapeAttr(el.id)}"${el.value ? ` data-value="${escapeAttr(el.value)}"` : ""}>${escapeHtml(el.label)}</button>`;
     case "actions":
       return `<div class="actions">${el.children.map(renderElementHtml).join("")}</div>`;
     case "image":
-      return `<img src="${escapeAttr(el.url)}" alt="${escapeAttr(el.alt ?? "")}" />`;
+      return `<img src="${escapeUrlAttr(el.url)}" alt="${escapeAttr(el.alt ?? "")}" />`;
     case "table": {
       const head = `<thead><tr>${el.headers.map((h) => `<th>${escapeHtml(h)}</th>`).join("")}</tr></thead>`;
       const body =
@@ -199,7 +199,12 @@ function renderElementHtml(el: CardElement): string {
     }
     case "select":
       return (
-        `<label>${escapeHtml(el.label ?? "")}<select name="${escapeAttr(el.id)}"${el.placeholder ? ` placeholder="${escapeAttr(el.placeholder)}"` : ""}>` +
+        `<label>${escapeHtml(el.label ?? "")}<select name="${escapeAttr(el.id)}">` +
+        // `<select>` has no `placeholder` attribute; render it as a disabled,
+        // selected leading option instead (valid HTML with the same intent).
+        (el.placeholder
+          ? `<option value="" disabled selected>${escapeHtml(el.placeholder)}</option>`
+          : "") +
         el.options.map((o) => `<option value="${escapeAttr(o.value)}">${escapeHtml(o.label)}</option>`).join("") +
         `</select></label>`
       );
@@ -216,10 +221,10 @@ function renderElementHtml(el: CardElement): string {
       );
     case "document-preview": {
       const thumb = el.thumbnailUrl
-        ? `<img class="thumb" src="${escapeAttr(el.thumbnailUrl)}" alt="" />`
+        ? `<img class="thumb" src="${escapeUrlAttr(el.thumbnailUrl)}" alt="" />`
         : "";
       const link = el.signingUrl
-        ? `<a class="btn btn-primary" href="${escapeAttr(el.signingUrl)}">Open</a>`
+        ? `<a class="btn btn-primary" href="${escapeUrlAttr(el.signingUrl)}">Open</a>`
         : "";
       return `<div class="doc-preview">${thumb}<div class="meta"><strong>${escapeHtml(el.name)}</strong><span class="status">${escapeHtml(el.status)}</span>${link}</div></div>`;
     }
@@ -248,4 +253,29 @@ function escapeHtml(input: string): string {
 
 function escapeAttr(input: string): string {
   return escapeHtml(input);
+}
+
+/** URL schemes considered safe to emit into `href`/`src` attributes. */
+const SAFE_URL_SCHEMES = new Set(["http", "https", "mailto", "tel"]);
+
+/**
+ * Neutralize dangerous URLs before they reach an `href`/`src` attribute.
+ * Blocks `javascript:`, `data:`, `vbscript:` and any other non-allowlisted
+ * scheme (returning `#`) while permitting scheme-relative and relative URLs.
+ * Control characters browsers strip are removed first so they can't be used to
+ * smuggle a blocked scheme (e.g. `java\tscript:`).
+ */
+function sanitizeUrl(url: string): string {
+  // Strip ASCII control characters browsers ignore so they cannot smuggle a
+  // blocked scheme (e.g. a tab inside "javascript:"), then trim whitespace.
+  // eslint-disable-next-line no-control-regex
+  const cleaned = url.replace(/[\u0000-\u001F\u007F]/g, "").trim();
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(cleaned);
+  if (scheme && !SAFE_URL_SCHEMES.has(scheme[1]!.toLowerCase())) return "#";
+  return cleaned;
+}
+
+/** Escape + scheme-sanitize a URL for safe use in an `href`/`src` attribute. */
+function escapeUrlAttr(url: string): string {
+  return escapeAttr(sanitizeUrl(url));
 }

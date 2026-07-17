@@ -39,7 +39,8 @@ describe("createMemoryAdapter (factory)", () => {
       received.push({
         text: m.text,
         isMention: m.isMention,
-        from: m.from.id,
+        // The SDK always populates the deprecated `from` alias; assert it here.
+        from: m.from!.id,
         author: m.author.id,
       });
     });

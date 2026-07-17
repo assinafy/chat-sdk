@@ -12,6 +12,7 @@ import { HttpClient } from "./http.js";
 import type {
   ApiKeyRecord,
   ChangePasswordInput,
+  LinkSocialLoginInput,
   LoginInput,
   LoginResponse,
   RequestPasswordResetInput,
@@ -30,6 +31,11 @@ export class AuthResource {
   /** Sign in / register via a social provider (Google, Apple, …). */
   socialLogin(input: SocialLoginInput): Promise<LoginResponse> {
     return this.http.post<LoginResponse>("/authentication/social-login", input);
+  }
+
+  /** Link a social-login provider account to the authenticated user. */
+  async linkSocialLogin(input: LinkSocialLoginInput): Promise<void> {
+    await this.http.post<unknown>("/auth/link-social-login", input);
   }
 
   /** Mint a new API key. Requires the current password to confirm. */
