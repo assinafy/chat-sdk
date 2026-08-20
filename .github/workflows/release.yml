@@ -109,7 +109,7 @@ jobs:
           scope: "@assinafy"
 
       - name: Publish to npmjs with OIDC
-        run: npm publish package/*.tgz --access public
+        run: npm publish ./package/*.tgz --access public
 
   publish-github-packages:
     name: Publish to GitHub Packages
@@ -138,6 +138,6 @@ jobs:
           scope: "@assinafy"
 
       - name: Publish to GitHub Packages
-        run: npm publish package/*.tgz --access public
+        run: npm publish ./package/*.tgz --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
