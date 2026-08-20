@@ -13,7 +13,7 @@
 export interface ApiEnvelope<T> {
   status: number;
   message: string;
-  data: T;
+  data?: T;
 }
 
 /** Pagination details surfaced via `X-Pagination-*` response headers. */
@@ -85,6 +85,24 @@ export interface DeleteAccountInput {
   force?: boolean;
 }
 
+/** Monthly or daily document-funnel statistics query. Daily queries require `month` (`YYYY-MM`). */
+export type DocumentStatsQuery =
+  | { granularity?: "monthly"; month?: never }
+  | { granularity: "daily"; month: string };
+
+/** One period returned by the account/user statistics endpoints. */
+export interface DocumentStatsRow {
+  period: string;
+  documents_uploaded: number;
+  documents_sent: number;
+  signature_requests: number;
+  signature_requests_email: number;
+  signature_requests_whatsapp: number;
+  signature_requests_viewed: number;
+  signature_requests_completed: number;
+  documents_certified: number;
+}
+
 // ---------------------------------------------------------------------------
 // Auth
 // ---------------------------------------------------------------------------
@@ -95,12 +113,22 @@ export interface LoginInput {
   password: string;
 }
 
+/** Account summary embedded in authentication responses. */
+export interface AuthAccount {
+  id: string;
+  name: string;
+  roles: string[];
+  is_delete_allowed: boolean;
+  created_at: string;
+}
+
 /** Login response containing the bearer access token and user context. */
 export interface LoginResponse {
   access_token: string;
+  user: AuthenticatedUser;
+  accounts: AuthAccount[];
+  /** Older deployments may also return the token expiration. */
   expires_at?: string;
-  user?: Record<string, unknown>;
-  accounts?: Array<Record<string, unknown>>;
 }
 
 /** Social-provider login request. */
@@ -118,7 +146,12 @@ export interface LinkSocialLoginInput {
 
 /** API key payload returned by create/get API-key endpoints. */
 export interface ApiKeyRecord {
-  api_key: string;
+  api_key: string | null;
+}
+
+/** E-mail echoed by password-management endpoints. */
+export interface EmailResult {
+  email: string;
 }
 
 /** Change-password request. */
@@ -140,12 +173,44 @@ export interface ResetPasswordInput {
   new_password: string;
 }
 
+/** Authenticated user profile returned by `GET /users/self`. */
+export interface AuthenticatedUser {
+  id: string;
+  name: string;
+  email: string;
+  telephone: string | null;
+  government_id: string | null;
+  is_email_verified: boolean;
+  has_accepted_terms: boolean;
+  created_at: string;
+  to_be_deleted_at: string | null;
+}
+
+/** Complete owner-facing e-mail preference map returned by the API. */
+export interface NotificationPreferences {
+  DocumentCompleted: boolean;
+  SignerDeclined: boolean;
+  DocumentCancelled: boolean;
+  DocumentAboutToExpire: boolean;
+  DocumentExpired: boolean;
+  DocumentExpirationReset: boolean;
+  DocumentProcessingFailed: boolean;
+  TemplateProcessingFailed: boolean;
+  SignerWhatsappFailed: boolean;
+}
+
+/** Non-empty partial map accepted by `PUT /users/self/notification-preferences`. */
+export type UpdateNotificationPreferences = Partial<NotificationPreferences> &
+  {
+    [K in keyof NotificationPreferences]: Pick<NotificationPreferences, K>;
+  }[keyof NotificationPreferences];
+
 // ---------------------------------------------------------------------------
 // Signers
 // ---------------------------------------------------------------------------
 
 /** Verification method codes accepted by assignment/template APIs. */
-export type VerificationMethod = "Email" | "Whatsapp" | (string & {});
+export type VerificationMethod = "Email" | "Whatsapp" | "DigitalCertificate" | (string & {});
 
 /** Notification channel codes accepted by assignment/template APIs. */
 export type NotificationMethod = "Email" | "Whatsapp" | (string & {});
@@ -157,16 +222,34 @@ export interface Signer {
   full_name: string;
   email: string | null;
   whatsapp_phone_number?: string | null;
+  government_id?: string | null;
   has_accepted_terms: boolean;
   has_signature?: boolean;
   has_initial?: boolean;
-  completed?: boolean;
-  notification_history?: unknown[];
-  verification_method?: VerificationMethod;
-  notification_methods?: NotificationMethod[];
-  step?: number;
-  notified?: boolean;
+  completed?: boolean | null;
+  notification_history?: NotificationHistoryEntry[] | null;
+  verification_method?: VerificationMethod | null;
+  notification_methods?: NotificationMethod[] | null;
+  step?: number | null;
+  notified?: boolean | null;
   [key: string]: unknown;
+}
+
+/** One e-mail or WhatsApp delivery attempt embedded in an assignment signer. */
+export interface NotificationHistoryEntry {
+  event?: string;
+  status?: "sent" | "failed";
+  error_code?: string | null;
+  error_message?: string | null;
+  sent_at?: string | null;
+  failed_at?: string | null;
+}
+
+/** Signer profile returned by `GET /signers/self`. */
+export interface SignerSelf extends Signer {
+  has_signature: boolean;
+  has_initial: boolean;
+  is_signature_reusable: boolean;
 }
 
 /** Signer creation request. */
@@ -177,7 +260,10 @@ export interface CreateSignerInput {
 }
 
 /** Signer update request. */
-export type UpdateSignerInput = Partial<CreateSignerInput>;
+export interface UpdateSignerInput extends Partial<CreateSignerInput> {
+  /** CPF/CNPJ; the API normalizes it to digits. */
+  government_id?: string;
+}
 
 /** Query accepted by signer list endpoints. */
 export interface ListSignersQuery {
@@ -242,9 +328,19 @@ export interface DocumentArtifacts {
   thumbnail?: string;
   certificated?: string;
   "certificate-page"?: string;
+  pades?: string;
   bundle?: string;
   [key: string]: string | undefined;
 }
+
+/** Document artifact names accepted by download endpoints. */
+export type DocumentArtifactName =
+  | "original"
+  | "certificated"
+  | "certificate-page"
+  | "pades"
+  | "bundle"
+  | (string & {});
 
 /** Assignment method codes. */
 export type AssignmentMethod = "virtual" | "collect" | (string & {});
@@ -258,6 +354,17 @@ export interface AssignmentItem {
   display_settings: unknown;
   value: unknown;
   completed: boolean;
+}
+
+/** Field placement in 150-DPI page-image pixels. */
+export interface DisplaySettings {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  fontSize: number;
+  fontFamily?: string;
+  backgroundColor?: string;
 }
 
 /** Assignment completion summary. */
@@ -350,8 +457,12 @@ export interface ListDocumentsQuery {
   perPage?: number;
 }
 
-/** Query accepted by signer-facing document lists. */
-export interface ListSignerDocumentsQuery extends ListDocumentsQuery {}
+/**
+ * Query accepted by signer-facing document lists. Production publishes only
+ * `page` and `perPage`; the other document filters remain for compatibility
+ * with deployments that already accepted them.
+ */
+export type ListSignerDocumentsQuery = ListDocumentsQuery;
 
 /**
  * Query accepted by the lightweight document-search endpoint. The search
@@ -391,17 +502,24 @@ export interface DocumentActivity {
   created_at: string;
 }
 
-/** Public document token request. */
-export interface SendPublicTokenInput {
-  recipient: string;
-  channel: "email" | "whatsapp" | (string & {});
-}
+/**
+ * Public document token request. `{ email }` is the current OpenAPI body;
+ * `{ recipient, channel }` remains available for older sandbox deployments.
+ */
+export type SendPublicTokenInput =
+  | { email: string; recipient?: never; channel?: never }
+  | {
+      recipient: string;
+      channel: "email" | "whatsapp" | (string & {});
+      email?: never;
+    };
 
-/** Public document token response. */
+/** Compatibility payload returned by older public-token deployments. */
 export interface SendPublicTokenResult {
-  document: PublicDocument | Record<string, unknown>;
-  channel: string;
-  recipient: string;
+  document?: PublicDocument | Record<string, unknown>;
+  channel?: string;
+  recipient?: string;
+  [key: string]: unknown;
 }
 
 // ---------------------------------------------------------------------------
@@ -475,6 +593,8 @@ export interface TemplateField {
   type?: string;
   display_settings?: unknown;
   is_required?: boolean;
+  created_at?: string;
+  updated_at?: string;
 }
 
 /** Role defined by a template. */
@@ -486,14 +606,27 @@ export interface TemplateRole {
   updated_at?: string;
 }
 
-/** Signer binding used when creating a document from a template. */
-export interface TemplateSignerInput {
-  role_id?: string;
-  id?: string;
-  full_name?: string;
-  email?: string;
-  whatsapp_phone_number?: string;
+interface TemplateSignerOptions {
   step?: number;
+  verification_method?: VerificationMethod;
+  notification_methods?: NotificationMethod[];
+}
+
+/** Signer binding used when creating a document from a template. */
+export type TemplateSignerInput =
+  | (TemplateSignerOptions & { role_id: string; id: string })
+  | (TemplateSignerOptions & {
+      /** @deprecated Older deployments accepted an inline signer instead of `id`. */
+      full_name: string;
+      role_id?: string;
+      id?: string;
+      email?: string;
+      whatsapp_phone_number?: string;
+    });
+
+/** Signer pricing input for the template estimate endpoint. */
+export interface TemplateCostSignerInput {
+  role_id: string;
   verification_method?: VerificationMethod;
   notification_methods?: NotificationMethod[];
 }
@@ -501,12 +634,13 @@ export interface TemplateSignerInput {
 /** Editor-filled template field value. */
 export interface TemplateEditorFieldInput {
   field_id: string;
-  value: unknown;
+  value: string;
 }
 
 /** Create-document-from-template request. */
 export interface CreateDocumentFromTemplateInput {
   signers: TemplateSignerInput[];
+  /** Object maps are retained for older deployments; current OpenAPI requires the array form. */
   editor_fields?: TemplateEditorFieldInput[] | Record<string, unknown>;
   name?: string;
   message?: string;
@@ -543,7 +677,7 @@ export interface CostEstimate {
 
 /** Per-signer assignment configuration. */
 export interface AssignmentSignerInput {
-  id?: string;
+  id: string;
   step?: number;
   verification_method?: VerificationMethod;
   notification_methods?: NotificationMethod[];
@@ -553,7 +687,7 @@ export interface AssignmentSignerInput {
 export interface AssignmentFieldInput {
   signer_id: string;
   field_id: string;
-  display_settings: Record<string, unknown>;
+  display_settings: DisplaySettings;
 }
 
 /** One page entry for collect assignments. */
@@ -564,16 +698,36 @@ export interface AssignmentEntryInput {
 
 /** Create/estimate assignment request. */
 export interface CreateAssignmentInput {
-  method?: AssignmentMethod;
+  method: AssignmentMethod;
   /** @deprecated Use `signer_ids`; kept for older callers. */
   signerIds?: string[];
   signer_ids?: string[];
   signers?: AssignmentSignerInput[];
   entries?: AssignmentEntryInput[];
   message?: string;
+  /** @deprecated Use `expires_at`; normalized before sending. */
   expiration?: string;
   expires_at?: string;
   copy_receivers?: string[];
+}
+
+/** Per-signer input accepted by assignment cost estimation (no signer ID needed). */
+export interface EstimateAssignmentSignerInput {
+  /** Older deployments also accept an existing signer id for estimates. */
+  id?: string;
+  verification_method?: VerificationMethod;
+  notification_methods?: NotificationMethod[];
+}
+
+/** Request accepted by the assignment cost-estimate endpoint. */
+export interface EstimateAssignmentCostInput {
+  method?: AssignmentMethod;
+  /** @deprecated Use `signers`; retained for older SDK callers. */
+  signerIds?: string[];
+  /** @deprecated Use `signers`; retained for older SDK callers. */
+  signer_ids?: string[];
+  signers?: EstimateAssignmentSignerInput[];
+  entries?: AssignmentEntryInput[];
 }
 
 /** Query accepted by the assignment list endpoint. */
@@ -589,7 +743,7 @@ export interface ResendNotificationResult {
   signer_id: string;
 }
 
-/** Cost estimate for resending one notification. */
+/** @deprecated Use {@link CostEstimate}; retained for older deployment responses. */
 export interface ResendCostEstimate {
   total: number;
   breakdown: Array<{ code: string; name: string; cost: number }>;
@@ -648,16 +802,19 @@ export interface ListFieldsQuery {
 export interface CreateFieldInput {
   type: string;
   name: string;
-  regex?: string;
+  regex?: string | null;
   is_required?: boolean;
+  /** @deprecated The create endpoint does not document this field; use update after creation. */
   is_active?: boolean;
 }
 
 /** Field-definition update request. */
 export interface UpdateFieldInput {
+  /** @deprecated The update endpoint does not document changing a field type. */
   type?: string;
   name?: string;
   regex?: string | null;
+  /** @deprecated The update endpoint does not document changing requiredness. */
   is_required?: boolean;
   is_active?: boolean;
 }
@@ -726,7 +883,7 @@ export interface WebhookSubscription extends Omit<WebhookSubscriptionInput, "url
   email: string | null;
   id?: string;
   created_at?: string;
-  updated_at?: string;
+  updated_at?: string | null;
 }
 
 /** Webhook event type metadata. */

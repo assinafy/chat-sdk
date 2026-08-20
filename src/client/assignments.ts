@@ -5,14 +5,14 @@
  * @see https://api.assinafy.com.br/v1/docs
  */
 
-import { HttpClient, withQuery } from "./http.js";
+import { withQuery, type HttpClient } from "./http.js";
 import type {
   Assignment,
   CostEstimate,
   CreateAssignmentInput,
+  EstimateAssignmentCostInput,
   ListAssignmentsQuery,
   Page,
-  ResendCostEstimate,
   ResendNotificationResult,
   WhatsAppNotification,
 } from "./types.js";
@@ -43,10 +43,9 @@ export class AssignmentsResource {
    * List the assignments belonging to the authenticated user's **current
    * account**.
    *
-   * Note: the API derives the account from a user session, so this endpoint
-   * requires a bearer access token. Requests authenticated with an API key
-   * return `400` (no current-account context); use the per-document assignment
-   * data on {@link DocumentsResource.get} in that case.
+   * Production OpenAPI declares bearer and API-key authentication. The
+   * 2026-08 sandbox still returns `400` for API keys because it lacks a current
+   * account context; bearer tokens work around that older deployment behavior.
    */
   list(query: ListAssignmentsQuery = {}): Promise<Page<Assignment>> {
     return this.http.getPage<Assignment>(
@@ -67,7 +66,7 @@ export class AssignmentsResource {
   }
 
   /** Estimate the cost of an assignment without creating it. */
-  estimateCost(documentId: string, input: CreateAssignmentInput): Promise<CostEstimate> {
+  estimateCost(documentId: string, input: EstimateAssignmentCostInput): Promise<CostEstimate> {
     return this.http.post<CostEstimate>(paths.estimate(documentId), normalizeAssignmentInput(input));
   }
 
@@ -85,8 +84,8 @@ export class AssignmentsResource {
     documentId: string,
     assignmentId: string,
     signerId: string,
-  ): Promise<ResendCostEstimate> {
-    return this.http.post<ResendCostEstimate>(paths.signerResendEstimate(documentId, assignmentId, signerId));
+  ): Promise<CostEstimate> {
+    return this.http.post<CostEstimate>(paths.signerResendEstimate(documentId, assignmentId, signerId));
   }
 
   /**
@@ -139,15 +138,20 @@ export class AssignmentsResource {
  * is required"). We therefore expand any id array into `signers` entries and
  * merge them with an explicit `signers` list.
  */
-function normalizeAssignmentInput(input: CreateAssignmentInput): Record<string, unknown> {
-  const { signerIds, signer_ids, signers, ...rest } = input;
+function normalizeAssignmentInput(
+  input: CreateAssignmentInput | EstimateAssignmentCostInput,
+): Record<string, unknown> {
+  const { signerIds, signer_ids, signers, ...rawRest } = input;
+  const { expiration, ...rest } = rawRest as typeof rawRest & { expiration?: string };
   const ids = signer_ids ?? signerIds ?? [];
   const explicit = signers ?? [];
   const seen = new Set(explicit.map((s) => s.id).filter(Boolean));
   const fromIds = ids.filter((id) => !seen.has(id)).map((id) => ({ id }));
   const merged = [...explicit, ...fromIds];
+  const expiresAt = "expires_at" in rest ? rest.expires_at : undefined;
   return {
     ...rest,
+    ...(expiration !== undefined && expiresAt === undefined ? { expires_at: expiration } : {}),
     ...(merged.length > 0 ? { signers: merged } : {}),
   };
 }

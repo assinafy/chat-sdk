@@ -23,6 +23,22 @@ describe("HttpClient", () => {
     expect(headers.get("X-Api-Key")).toBe("k");
   });
 
+  it("unwraps successful envelopes that omit data", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ status: 200, message: "sent" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const http = new HttpClient({
+      baseUrl: "https://api",
+      auth: { kind: "none" },
+      fetch: fetchImpl,
+    });
+
+    await expect(http.put<void>("/send-token", {})).resolves.toBeUndefined();
+  });
+
   it("attaches bearer token", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(mkResponse({ status: 200, message: "", data: null }));
     const http = new HttpClient({
@@ -101,6 +117,107 @@ describe("HttpClient", () => {
     expect(calls).toBe(2);
   });
 
+  it("never retries a mutating request after an ambiguous server error", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(mkResponse("oops", { status: 503 }));
+    const http = new HttpClient({
+      baseUrl: "https://api",
+      auth: { kind: "apiKey", apiKey: "k" },
+      fetch: fetchImpl,
+      maxRetries: 2,
+      retryBaseDelayMs: 1,
+    });
+
+    await expect(http.post("/documents", {})).rejects.toBeInstanceOf(ApiError);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it("retries native fetch errors whose network code is nested in cause", async () => {
+    const networkError = new TypeError("fetch failed", { cause: { code: "ECONNRESET" } });
+    const fetchImpl = vi
+      .fn()
+      .mockRejectedValueOnce(networkError)
+      .mockResolvedValueOnce(mkResponse({ status: 200, message: "", data: "ok" }));
+    const http = new HttpClient({
+      baseUrl: "https://api",
+      auth: { kind: "apiKey", apiKey: "k" },
+      fetch: fetchImpl,
+      retryBaseDelayMs: 1,
+    });
+
+    await expect(http.get("/x")).resolves.toBe("ok");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("refuses to attach credentials to a different origin", async () => {
+    const fetchImpl = vi.fn();
+    const http = new HttpClient({
+      baseUrl: "https://api.example/v1",
+      auth: { kind: "bearer", token: "secret" },
+      fetch: fetchImpl,
+    });
+
+    await expect(http.get("https://attacker.example/collect")).rejects.toBeInstanceOf(ConfigurationError);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("refuses redirects so custom authentication headers cannot cross origins", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(null, {
+        status: 302,
+        headers: { location: "https://attacker.example/collect" },
+      }),
+    );
+    const http = new HttpClient({
+      baseUrl: "https://api.example/v1",
+      auth: { kind: "apiKey", apiKey: "secret" },
+      fetch: fetchImpl,
+    });
+
+    await expect(http.get("/documents", { redirect: "follow" })).rejects.toBeInstanceOf(ApiError);
+    expect(fetchImpl.mock.calls[0]![1].redirect).toBe("manual");
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it("redacts signer credentials from API errors", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(mkResponse("denied", { status: 403 }));
+    const http = new HttpClient({
+      baseUrl: "https://api",
+      auth: { kind: "none" },
+      fetch: fetchImpl,
+      maxRetries: 0,
+    });
+
+    const result = http.get("/documents/x?signer-access-code=top-secret");
+    await expect(result).rejects.toMatchObject({
+      path: "/documents/x?signer-access-code=[REDACTED]",
+    });
+    await expect(result).rejects.not.toHaveProperty("message", expect.stringContaining("top-secret"));
+  });
+
+  it("applies retries and rate-limit hooks to raw downloads", async () => {
+    const onRateLimit = vi.fn();
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(mkResponse("busy", { status: 503 }))
+      .mockResolvedValueOnce(
+        mkResponse("file", {
+          headers: { "content-type": "application/pdf", "x-rate-limit-limit": "100" },
+        }),
+      );
+    const http = new HttpClient({
+      baseUrl: "https://api",
+      auth: { kind: "apiKey", apiKey: "k" },
+      fetch: fetchImpl,
+      retryBaseDelayMs: 1,
+      onRateLimit,
+    });
+
+    const response = await http.rawRequest("/documents/x/download/original");
+    expect(await response.text()).toBe("file");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(onRateLimit).toHaveBeenCalledWith({ limit: 100, remaining: 0, resetSeconds: 0 });
+  });
+
   it("refuses construction without auth credentials", () => {
     expect(
       () =>
@@ -108,6 +225,12 @@ describe("HttpClient", () => {
           baseUrl: "https://api",
           auth: { kind: "apiKey", apiKey: "" },
         }),
+    ).toThrow(ConfigurationError);
+  });
+
+  it("refuses a relative base URL", () => {
+    expect(
+      () => new HttpClient({ baseUrl: "/v1", auth: { kind: "none" }, fetch: vi.fn() }),
     ).toThrow(ConfigurationError);
   });
 });

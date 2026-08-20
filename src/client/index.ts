@@ -31,6 +31,7 @@ import { SignatureResource } from "./signature.js";
 import { SignersResource } from "./signers.js";
 import { TagsResource } from "./tags.js";
 import { TemplatesResource } from "./templates.js";
+import { UsersResource } from "./users.js";
 import { WebhooksResource } from "./webhooks.js";
 
 export * from "./errors.js";
@@ -42,11 +43,12 @@ export { AuthResource } from "./auth.js";
 export { SignersResource } from "./signers.js";
 export { DocumentsResource } from "./documents.js";
 export { FieldsResource } from "./fields.js";
-export { TagsResource } from "./tags.js";
+export { TagsResource, type DeleteTagResult, type DetachTagResult } from "./tags.js";
 export { TemplatesResource, type ListTemplatesQuery } from "./templates.js";
 export { AssignmentsResource } from "./assignments.js";
 export { SignatureResource, type SignatureType } from "./signature.js";
 export { WebhooksResource } from "./webhooks.js";
+export { UsersResource } from "./users.js";
 
 /** Configuration accepted by {@link AssinafyClient}. */
 export interface AssinafyClientOptions extends Omit<HttpClientOptions, "auth" | "baseUrl"> {
@@ -102,6 +104,7 @@ export class AssinafyClient {
   readonly assignments: AssignmentsResource;
   readonly signature: SignatureResource;
   readonly webhooks: WebhooksResource;
+  readonly users: UsersResource;
 
   constructor(options: AssinafyClientOptions = {}) {
     this.http = new HttpClient({
@@ -124,6 +127,7 @@ export class AssinafyClient {
     this.assignments = new AssignmentsResource(this.http);
     this.signature = new SignatureResource(this.http);
     this.webhooks = new WebhooksResource(this.http);
+    this.users = new UsersResource(this.http);
   }
 
   /**
@@ -135,7 +139,10 @@ export class AssinafyClient {
    * Returns an unauthenticated client if neither key nor token is set; this is
    * useful for login and public signer/document flows.
    */
-  static fromEnv(env: NodeJS.ProcessEnv = process.env): AssinafyClient {
+  static fromEnv(
+    env = (globalThis as { process?: { env?: Readonly<Record<string, string | undefined>> } })
+      .process?.env ?? {},
+  ): AssinafyClient {
     return new AssinafyClient({
       apiKey: env.ASSINAFY_API_KEY,
       accessToken: env.ASSINAFY_ACCESS_TOKEN,

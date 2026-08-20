@@ -60,6 +60,34 @@ describe("createMemoryAdapter (factory)", () => {
     expect(adapter.outbox).toHaveLength(0);
   });
 
+  it("supports listener cleanup, actions, no-op indicators, counts, and reset", async () => {
+    const messages: string[] = [];
+    const actions: string[] = [];
+    const stopMessages = adapter.onMessage((message) => {
+      messages.push(message.text);
+    });
+    const stopActions = adapter.onAction((action) => {
+      actions.push(action.actionId);
+    });
+
+    await adapter.receive({ text: "first" });
+    await adapter.receiveAction({ threadId: "t1", actionId: "approve" });
+    stopMessages();
+    stopActions();
+    await adapter.receive({ text: "ignored" });
+    await adapter.receiveAction({ threadId: "t1", actionId: "ignored" });
+    await adapter.addReaction();
+    await adapter.removeReaction();
+    await adapter.startTyping();
+
+    expect(messages).toEqual(["first"]);
+    expect(actions).toEqual(["approve"]);
+    await adapter.postMessage("t1", { text: "sent" });
+    expect(adapter.sentCount).toBe(1);
+    adapter.reset();
+    expect(adapter.sentCount).toBe(0);
+  });
+
   it("InMemoryAdapter alias still resolves to MemoryAdapter", async () => {
     const { InMemoryAdapter } = await import("../../src/adapters/memory.js");
     expect(InMemoryAdapter).toBe(MemoryAdapter);

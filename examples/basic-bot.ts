@@ -5,7 +5,9 @@
  * pattern: factory adapter, `MemoryStateAdapter`, capitalized card helpers,
  * `onCommand` for slash commands.
  *
- * Run with: `npx tsx examples/basic-bot.ts <document-id>`
+ * Run with:
+ *   ASSINAFY_API_KEY=... ASSINAFY_BASE_URL=https://sandbox.assinafy.com.br/v1 \
+ *     npx tsx examples/basic-bot.ts <document-id>
  */
 
 import {
@@ -20,6 +22,9 @@ import {
 } from "../src/index.js";
 
 async function main(): Promise<void> {
+  if (!process.env.ASSINAFY_API_KEY && !process.env.ASSINAFY_ACCESS_TOKEN) {
+    throw new Error("ASSINAFY_API_KEY or ASSINAFY_ACCESS_TOKEN is required");
+  }
   const client = AssinafyClient.fromEnv();
   const memory = createMemoryAdapter();
   const chat = new Chat({
@@ -30,7 +35,7 @@ async function main(): Promise<void> {
   });
 
   chat.onCommand("status", async (thread, msg) => {
-    const id = msg.text.replace(/^\/status\s*/, "").trim();
+    const id = msg.text.replace(/^[/!]status\s*/i, "").trim();
     if (!id) {
       await thread.post("Usage: `/status <document-id>`");
       return;

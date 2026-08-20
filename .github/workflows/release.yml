@@ -13,6 +13,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   verify:
     name: Verify package
@@ -20,15 +24,16 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ github.event.inputs.tag || github.ref_name }}
+          fetch-depth: 0
           persist-credentials: false
 
-      - name: Use Node.js 22
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - name: Use Node.js 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "22"
+          node-version: "24"
           cache: npm
 
       - name: Install dependencies
@@ -38,33 +43,42 @@ jobs:
         run: npm audit signatures
 
       - name: Verify tag matches package.json version
+        env:
+          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
-          tag="${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}"
-          tag_version="${tag#v}"
+          tag="$RELEASE_TAG"
           pkg_version=$(node -p "require('./package.json').version")
-          if [ "$tag_version" != "$pkg_version" ]; then
-            echo "::error::Tag $tag (version $tag_version) does not match package.json version $pkg_version"
+          if [ "$tag" != "v$pkg_version" ]; then
+            echo "::error::Tag $tag must be exactly v$pkg_version"
+            exit 1
+          fi
+          if ! git show-ref --verify --quiet "refs/tags/$tag"; then
+            echo "::error::$tag is not an existing Git tag."
             exit 1
           fi
           echo "Tag and package.json both at version $pkg_version"
 
-      - name: Typecheck
-        run: npm run typecheck
+      - name: Verify tag commit belongs to main
+        run: |
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "::error::Release tag must point to a commit contained in main."
+            exit 1
+          fi
 
-      - name: Lint
-        run: npm run lint --if-present
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
 
-      - name: Unit tests
-        run: npm run test:unit
+      - name: Verify SDK
+        run: npm run verify
 
-      - name: Build
-        run: npm run build
+      - name: Pack release artifact
+        run: npm pack --ignore-scripts
 
-      - name: Upload dist
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - name: Upload release artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: dist
-          path: dist
+          name: npm-package
+          path: "*.tgz"
           retention-days: 30
           if-no-files-found: error
 
@@ -78,37 +92,24 @@ jobs:
       url: https://www.npmjs.com/package/@assinafy/chat-sdk
     permissions:
       contents: read
-      # `id-token: write` is required by `npm publish --provenance` so npm can
-      # mint a signed provenance attestation via GitHub's OIDC token.
       id-token: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Download verified package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
-          persist-credentials: false
+          name: npm-package
+          path: package
 
-      - name: Use Node.js 22
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - name: Use Node.js 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "22"
-          cache: npm
+          node-version: "24"
+          package-manager-cache: false
           registry-url: "https://registry.npmjs.org"
-          # Force the package scope so the publish targets npmjs even though
-          # the same name is also published to GitHub Packages.
           scope: "@assinafy"
-          always-auth: true
 
-      - name: Install dependencies
-        run: npm ci --no-audit --no-fund
-
-      - name: Build
-        run: npm run build
-
-      - name: Publish to npmjs (with provenance)
-        run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish to npmjs with OIDC
+        run: npm publish package/*.tgz --access public
 
   publish-github-packages:
     name: Publish to GitHub Packages
@@ -121,37 +122,22 @@ jobs:
     permissions:
       contents: read
       packages: write
-      # Required for `npm publish --provenance` against GitHub Packages too.
-      id-token: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Download verified package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
-          persist-credentials: false
+          name: npm-package
+          path: package
 
-      - name: Use Node.js 22
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - name: Use Node.js 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "22"
-          cache: npm
-          # GitHub Packages requires the package scope to match the repo owner.
-          # @assinafy already matches; setup-node writes ~/.npmrc accordingly.
+          node-version: "24"
+          package-manager-cache: false
           registry-url: "https://npm.pkg.github.com"
           scope: "@assinafy"
-          always-auth: true
 
-      - name: Install dependencies
-        # Install against the npmjs registry — only the publish step targets
-        # GitHub Packages. Otherwise transitive deps fail to resolve.
-        run: npm ci --no-audit --no-fund --registry=https://registry.npmjs.org
-
-      - name: Build
-        run: npm run build
-
-      - name: Publish to GitHub Packages (with provenance)
-        run: npm publish --provenance --access public
+      - name: Publish to GitHub Packages
+        run: npm publish package/*.tgz --access public
         env:
-          # GitHub Packages authenticates with the built-in GITHUB_TOKEN; no
-          # extra secret needs to be configured.
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

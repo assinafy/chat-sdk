@@ -6,11 +6,11 @@
  * Anthropic's tool-calling loop driving the Assinafy client.
  *
  * Run with:
- *   ANTHROPIC_API_KEY=... npx tsx examples/ai-bot.ts "Show me my pending documents"
+ *   ASSINAFY_API_KEY=... ASSINAFY_ACCOUNT_ID=... ANTHROPIC_API_KEY=... \
+ *     npx tsx examples/ai-bot.ts "Show me my pending documents"
  *
- * NOTE: `@anthropic-ai/sdk` is not a dependency of this SDK — the import
- * lives only in this example. Install it in your own project if you want to
- * use this pattern.
+ * This example uses the native `fetch` available in Node 24, so it needs no
+ * Anthropic SDK dependency.
  */
 
 import {
@@ -18,14 +18,75 @@ import {
   AssinafyClient,
   createMemoryAdapter,
   MemoryStateAdapter,
-  createChatTools,
-  runTool,
-  defaultSystemPrompt,
 } from "../src/index.js";
+import { createChatTools, defaultSystemPrompt, runTool, type ChatTool } from "../src/ai/index.js";
 
-import Anthropic from "@anthropic-ai/sdk";
+interface TextBlock {
+  type: "text";
+  text: string;
+}
+
+interface ToolUseBlock {
+  type: "tool_use";
+  id: string;
+  name: string;
+  input: unknown;
+}
+
+type ContentBlock = TextBlock | ToolUseBlock;
+
+interface ToolResultBlock {
+  type: "tool_result";
+  tool_use_id: string;
+  content: string;
+  is_error?: boolean;
+}
+
+type Message = {
+  role: "user" | "assistant";
+  content: string | ContentBlock[] | ToolResultBlock[];
+};
+
+async function createMessage(
+  apiKey: string,
+  model: string,
+  system: string,
+  tools: ChatTool[],
+  messages: Message[],
+): Promise<{ content: ContentBlock[] }> {
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 1024,
+      system,
+      tools: tools.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        input_schema: tool.input_schema,
+      })),
+      messages,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`Anthropic API ${response.status}: ${await response.text()}`);
+  }
+  return response.json() as Promise<{ content: ContentBlock[] }>;
+}
 
 async function main(): Promise<void> {
+  const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+  if (!anthropicApiKey) throw new Error("ANTHROPIC_API_KEY is required");
+  if (!process.env.ASSINAFY_API_KEY && !process.env.ASSINAFY_ACCESS_TOKEN) {
+    throw new Error("ASSINAFY_API_KEY or ASSINAFY_ACCESS_TOKEN is required");
+  }
+  if (!process.env.ASSINAFY_ACCOUNT_ID) throw new Error("ASSINAFY_ACCOUNT_ID is required");
+
   const client = AssinafyClient.fromEnv();
   const tools = createChatTools(client);
   const memory = createMemoryAdapter();
@@ -36,25 +97,19 @@ async function main(): Promise<void> {
     client,
   });
 
-  const anthropic = new Anthropic();
-
   chat.onFallback(async (thread, msg) => {
-    const messages: Anthropic.MessageParam[] = [{ role: "user", content: msg.text }];
+    const messages: Message[] = [{ role: "user", content: msg.text }];
     while (true) {
-      const response = await anthropic.messages.create({
-        model: "claude-sonnet-4-6",
-        max_tokens: 1024,
-        system: defaultSystemPrompt("Assinafy"),
-        tools: tools.map((t) => ({
-          name: t.name,
-          description: t.description,
-          input_schema: t.input_schema as Anthropic.Tool.InputSchema,
-        })),
+      const response = await createMessage(
+        anthropicApiKey,
+        process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-6",
+        defaultSystemPrompt("Assinafy"),
+        tools,
         messages,
-      });
+      );
 
-      const toolUses = response.content.filter((c) => c.type === "tool_use") as Anthropic.ToolUseBlock[];
-      const textParts = response.content.filter((c) => c.type === "text") as Anthropic.TextBlock[];
+      const toolUses = response.content.filter((block): block is ToolUseBlock => block.type === "tool_use");
+      const textParts = response.content.filter((block): block is TextBlock => block.type === "text");
 
       if (toolUses.length === 0) {
         await thread.post(textParts.map((t) => t.text).join("\n"));
@@ -62,7 +117,7 @@ async function main(): Promise<void> {
       }
 
       messages.push({ role: "assistant", content: response.content });
-      const toolResults: Anthropic.ToolResultBlockParam[] = [];
+      const toolResults: ToolResultBlock[] = [];
       for (const use of toolUses) {
         try {
           const out = await runTool(tools, use.name, use.input);

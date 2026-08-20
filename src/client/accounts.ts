@@ -8,13 +8,15 @@
  * @see https://api.assinafy.com.br/v1/docs
  */
 
-import { HttpClient } from "./http.js";
+import { withQuery, type HttpClient } from "./http.js";
 import { toBlobPart } from "./internal.js";
 import type {
   Account,
   AccountTheme,
   CreateAccountInput,
   DeleteAccountInput,
+  DocumentStatsQuery,
+  DocumentStatsRow,
   UpdateAccountInput,
 } from "./types.js";
 
@@ -23,6 +25,7 @@ const paths = {
   item: (accountId: string) => `/accounts/${encodeURIComponent(accountId)}`,
   theme: (accountId: string) => `/accounts/${encodeURIComponent(accountId)}/theme`,
   logo: (accountId: string) => `/accounts/${encodeURIComponent(accountId)}/logo`,
+  stats: (accountId: string) => `/accounts/${encodeURIComponent(accountId)}/stats`,
 };
 
 /** Input for uploading an account logo via multipart/form-data. */
@@ -74,6 +77,11 @@ export class AccountsResource {
   /** Get the account theme (branding name, colors, and logo URL). */
   getTheme(accountId: string): Promise<AccountTheme> {
     return this.http.get<AccountTheme>(paths.theme(accountId));
+  }
+
+  /** Return monthly or daily document-funnel statistics for this account. */
+  getStats(accountId: string, query: DocumentStatsQuery = {}): Promise<DocumentStatsRow[]> {
+    return this.http.get<DocumentStatsRow[]>(withQuery(paths.stats(accountId), query));
   }
 
   /** Download the account logo as an image `Response`. */

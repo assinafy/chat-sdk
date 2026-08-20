@@ -8,11 +8,13 @@
  * @see https://api.assinafy.com.br/v1/docs
  */
 
-import { HttpClient, withQuery } from "./http.js";
+import { ApiError } from "./errors.js";
+import { withQuery, type HttpClient } from "./http.js";
 import { csv, toBlobPart } from "./internal.js";
 import type {
   Document,
   DocumentActivity,
+  DocumentArtifactName,
   DocumentStatus,
   DocumentVerificationResult,
   ListDocumentsQuery,
@@ -54,7 +56,7 @@ export class DocumentsResource {
   list(accountId: string, query: ListDocumentsQuery = {}): Promise<Page<Document>> {
     return this.http.getPage<Document>(
       withQuery(paths.collection(accountId), {
-        status: query.status,
+        status: csv(query.status),
         method: query.method,
         search: query.search,
         tags: csv(query.tags),
@@ -74,7 +76,7 @@ export class DocumentsResource {
     return this.http.getPage<Document>(
       withQuery(paths.search(accountId), {
         search: query.search,
-        status: query.status,
+        status: csv(query.status),
         page: query.page,
         "per-page": query.perPage,
       }),
@@ -141,7 +143,7 @@ export class DocumentsResource {
    * Download a specific artifact (e.g. `original`, `certificated`).
    * Returns a `Response` so callers can stream, buffer, or pipe as they like.
    */
-  download(documentId: string, artifactName: string): Promise<Response> {
+  download(documentId: string, artifactName: DocumentArtifactName): Promise<Response> {
     return this.http.rawRequest(paths.download(documentId, artifactName));
   }
 
@@ -166,12 +168,29 @@ export class DocumentsResource {
   }
 
   /** Public, unauthenticated fetch of a document by id (used by signer UIs). */
-  publicGet(documentId: string): Promise<PublicDocument> {
-    return this.http.get<PublicDocument>(paths.publicGet(documentId));
+  publicGet(documentId: string): Promise<Document | PublicDocument> {
+    return this.http.get<Document | PublicDocument>(paths.publicGet(documentId));
   }
 
-  /** Public: ask Assinafy to send an access token to a recipient via email/WhatsApp. */
-  sendPublicToken(documentId: string, input: SendPublicTokenInput): Promise<SendPublicTokenResult> {
-    return this.http.put<SendPublicTokenResult>(paths.sendToken(documentId), input);
+  /** Public: ask Assinafy to email an access token (`recipient`/`channel` is legacy). */
+  async sendPublicToken(
+    documentId: string,
+    input: SendPublicTokenInput,
+  ): Promise<SendPublicTokenResult | undefined> {
+    try {
+      return await this.http.put<SendPublicTokenResult | undefined>(paths.sendToken(documentId), input);
+    } catch (error) {
+      if (
+        !(error instanceof ApiError) ||
+        ![400, 422].includes(error.status) ||
+        typeof input.email !== "string"
+      ) {
+        throw error;
+      }
+      return this.http.put<SendPublicTokenResult | undefined>(paths.sendToken(documentId), {
+        recipient: input.email,
+        channel: "email",
+      });
+    }
   }
 }

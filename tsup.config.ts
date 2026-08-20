@@ -21,7 +21,7 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   treeshake: true,
-  target: "node20",
+  target: "node24",
   // Inject the package version so the client's User-Agent never drifts.
   define: {
     __SDK_VERSION__: JSON.stringify(pkg.version),

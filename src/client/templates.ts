@@ -5,7 +5,7 @@
  * @see https://api.assinafy.com.br/v1/docs
  */
 
-import { HttpClient, withQuery } from "./http.js";
+import { withQuery, type HttpClient } from "./http.js";
 import { csv } from "./internal.js";
 import type {
   CostEstimate,
@@ -13,7 +13,7 @@ import type {
   Document,
   Page,
   Template,
-  TemplateSignerInput,
+  TemplateCostSignerInput,
 } from "./types.js";
 
 const paths = {
@@ -76,7 +76,7 @@ export class TemplatesResource {
   estimateCost(
     accountId: string,
     templateId: string,
-    input: Pick<CreateDocumentFromTemplateInput, "signers"> | TemplateSignerInput[],
+    input: { signers: TemplateCostSignerInput[] } | TemplateCostSignerInput[],
   ): Promise<CostEstimate> {
     const body = Array.isArray(input) ? { signers: input } : input;
     return this.http.post<CostEstimate>(paths.estimate(accountId, templateId), body);

@@ -7,14 +7,15 @@
  * @see https://api.assinafy.com.br/v1/docs
  */
 
-import { HttpClient, withQuery } from "./http.js";
+import { withQuery, type HttpClient } from "./http.js";
 import { csv, toBlobPart } from "./internal.js";
 import type {
   Document,
+  DocumentArtifactName,
   ListSignerDocumentsQuery,
   Page,
   SignFieldEntry,
-  Signer,
+  SignerSelf,
 } from "./types.js";
 
 export type SignatureType = "signature" | "initial" | (string & {});
@@ -44,8 +45,8 @@ export class SignatureResource {
   constructor(private readonly http: HttpClient) {}
 
   /** Fetch the signer's own record using their access code. */
-  self(accessCode: string): Promise<Signer> {
-    return this.http.get<Signer>(withQuery(paths.self(), { "signer-access-code": accessCode }));
+  self(accessCode: string): Promise<SignerSelf> {
+    return this.http.get<SignerSelf>(withQuery(paths.self(), { "signer-access-code": accessCode }));
   }
 
   /**
@@ -68,14 +69,15 @@ export class SignatureResource {
   }
 
   /**
-   * Upload a signature image (PNG/JPEG) for the signer.
+   * Upload a signature image for the signer.
    *
-   * The `type` query parameter discriminates signature, rubric, or initials.
-   * Pass `reuse: true` to reuse the previously stored image of that type.
+   * Production accepts a PNG body without `type`. Older deployments also
+   * accept an explicit type and other image content types. Pass `reuse: true`
+   * to reuse the previously stored image of that type.
    */
   async upload(
     accessCode: string,
-    type: SignatureType,
+    type: SignatureType | undefined,
     image: Blob | ArrayBuffer | Uint8Array,
     contentType = "image/png",
     reuse?: boolean,
@@ -124,7 +126,7 @@ export class SignatureResource {
     return this.http.getPage<Document>(
       withQuery(paths.signerDocuments(signerId), {
         "signer-access-code": accessCode,
-        status: query.status,
+        status: csv(query.status),
         method: query.method,
         search: query.search,
         sort: query.sort,
@@ -202,12 +204,12 @@ export class SignatureResource {
     );
   }
 
-  /** Download a signer-visible document artifact. */
+  /** Download a signer-visible document artifact; older deployments may require an access code. */
   downloadDocument(
     signerId: string,
     documentId: string,
-    artifactName: string,
-    accessCode: string,
+    artifactName: DocumentArtifactName,
+    accessCode?: string,
   ): Promise<Response> {
     return this.http.rawRequest(
       withQuery(paths.signerDownload(signerId, documentId, artifactName), {

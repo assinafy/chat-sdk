@@ -16,31 +16,12 @@ export default [
         ecmaVersion: "latest",
         sourceType: "module",
       },
-      globals: {
-        // Node 20+ globals used across the SDK.
-        fetch: "readonly",
-        Headers: "readonly",
-        Request: "readonly",
-        Response: "readonly",
-        Blob: "readonly",
-        FormData: "readonly",
-        URL: "readonly",
-        URLSearchParams: "readonly",
-        TextEncoder: "readonly",
-        TextDecoder: "readonly",
-        Buffer: "readonly",
-        process: "readonly",
-        setTimeout: "readonly",
-        setImmediate: "readonly",
-        clearTimeout: "readonly",
-        globalThis: "readonly",
-        console: "readonly",
-      },
     },
     plugins: {
       "@typescript-eslint": tseslint,
     },
     rules: {
+      ...tseslint.configs.recommended.rules,
       // TypeScript replaces these built-in checks.
       "no-unused-vars": "off",
       "no-undef": "off",
@@ -49,7 +30,7 @@ export default [
       "no-empty": ["error", { allowEmptyCatch: true }],
 
       "@typescript-eslint/no-unused-vars": [
-        "warn",
+        "error",
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
       ],
     },

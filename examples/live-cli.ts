@@ -5,7 +5,10 @@
  * adapter and prints the bot's responses on stdout. Useful for kicking the
  * tires on an integration without wiring up a real platform.
  *
- * Run with: `npx tsx examples/live-cli.ts`
+ * Run with:
+ *   ASSINAFY_API_KEY=... ASSINAFY_ACCOUNT_ID=... \
+ *   ASSINAFY_BASE_URL=https://sandbox.assinafy.com.br/v1 \
+ *     npx tsx examples/live-cli.ts
  */
 import { createInterface } from "node:readline/promises";
 import {
@@ -21,6 +24,12 @@ import {
 } from "../src/index.js";
 
 async function main(): Promise<void> {
+  if (!process.env.ASSINAFY_API_KEY && !process.env.ASSINAFY_ACCESS_TOKEN) {
+    throw new Error("ASSINAFY_API_KEY or ASSINAFY_ACCESS_TOKEN is required");
+  }
+  const accountId = process.env.ASSINAFY_ACCOUNT_ID;
+  if (!accountId) throw new Error("ASSINAFY_ACCOUNT_ID is required");
+
   const client = AssinafyClient.fromEnv();
   const memory = createMemoryAdapter();
   const chat = new Chat({
@@ -31,7 +40,7 @@ async function main(): Promise<void> {
   });
 
   chat.onCommand("docs", async (thread) => {
-    const page = await client.documents.list(client.accountId!, { perPage: 5 });
+    const page = await client.documents.list(accountId, { perPage: 5 });
     await thread.post(
       Card({
         title: "Recent documents",
@@ -48,7 +57,11 @@ async function main(): Promise<void> {
   });
 
   chat.onCommand("status", async (thread, msg) => {
-    const id = msg.text.replace(/^\/status\s*/, "").trim();
+    const id = msg.text.replace(/^[/!]status\s*/i, "").trim();
+    if (!id) {
+      await thread.post("Usage: `/status <document-id>`");
+      return;
+    }
     const doc = await client.documents.get(id);
     await thread.post(
       Card({

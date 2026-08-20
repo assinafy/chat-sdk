@@ -92,6 +92,18 @@ describe("Chat", () => {
     expect(adapter.lastSent?.card?.title).toBe("Hi");
   });
 
+  it("exposes subscription and key-value state through a thread", async () => {
+    const thread = await chat.openThread("alice@example.com");
+    await thread.subscribe();
+    await expect(thread.isSubscribed()).resolves.toBe(true);
+    await thread.set("document", { id: "d1" });
+    await expect(thread.get("document")).resolves.toEqual({ id: "d1" });
+    await thread.delete("document");
+    await expect(thread.get("document")).resolves.toBeUndefined();
+    await thread.unsubscribe();
+    await expect(thread.isSubscribed()).resolves.toBe(false);
+  });
+
   it("post accepts { card, fallbackText }", async () => {
     const thread = await chat.openThread("alice@example.com");
     await thread.post({

@@ -9,7 +9,7 @@
  * @see https://api.assinafy.com.br/v1/docs
  */
 
-import { HttpClient, withQuery } from "./http.js";
+import { withQuery, type HttpClient } from "./http.js";
 import type {
   CreateSignerInput,
   ListSignersQuery,

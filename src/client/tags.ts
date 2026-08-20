@@ -4,8 +4,11 @@
  * @see https://api.assinafy.com.br/v1/docs
  */
 
-import { HttpClient, withQuery } from "./http.js";
+import { withQuery, type HttpClient } from "./http.js";
 import type { CreateTagInput, ListTagsQuery, Page, Tag, UpdateTagInput } from "./types.js";
+
+export interface DeleteTagResult { deleted: boolean }
+export interface DetachTagResult { detached: boolean }
 
 const paths = {
   collection: (accountId: string) => `/accounts/${encodeURIComponent(accountId)}/tags`,
@@ -47,8 +50,14 @@ export class TagsResource {
    * Delete a tag. Pass `force: true` to detach the tag from any documents
    * before deleting it; otherwise the API will refuse if it is still in use.
    */
-  async remove(accountId: string, tagId: string, options: { force?: boolean } = {}): Promise<void> {
-    await this.http.delete<unknown>(withQuery(paths.item(accountId, tagId), { force: options.force }));
+  remove(
+    accountId: string,
+    tagId: string,
+    options: { force?: boolean } = {},
+  ): Promise<DeleteTagResult> {
+    return this.http.delete<DeleteTagResult>(
+      withQuery(paths.item(accountId, tagId), { force: options.force }),
+    );
   }
 
   /** List the tags attached to a specific document. */
@@ -57,24 +66,26 @@ export class TagsResource {
   }
 
   /**
-   * Replace the tags attached to a document with the given tag names.
-   * Unknown names are created by the API. Tag IDs are still accepted for
-   * backward compatibility where existing callers passed them.
+   * Replace the tags attached to a document with the given tag IDs.
+   * Older sandbox deployments also accept names and create missing tags.
    */
-  setForDocument(accountId: string, documentId: string, tagNames: string[]): Promise<Tag[]> {
-    return this.http.put<Tag[]>(paths.documentTags(accountId, documentId), { tags: tagNames });
+  setForDocument(accountId: string, documentId: string, tagIds: string[]): Promise<Tag[]> {
+    return this.http.put<Tag[]>(paths.documentTags(accountId, documentId), { tags: tagIds });
   }
 
   /**
-   * Add tag names to a document without removing existing tags. Unknown names
-   * are created by the API.
+   * Add tag IDs to a document without removing existing tags.
    */
-  addToDocument(accountId: string, documentId: string, tagNames: string[]): Promise<Tag[]> {
-    return this.http.post<Tag[]>(paths.documentTags(accountId, documentId), { tags: tagNames });
+  addToDocument(accountId: string, documentId: string, tagIds: string[]): Promise<Tag[]> {
+    return this.http.post<Tag[]>(paths.documentTags(accountId, documentId), { tags: tagIds });
   }
 
   /** Remove a single tag from a document. */
-  async removeFromDocument(accountId: string, documentId: string, tagId: string): Promise<void> {
-    await this.http.delete<unknown>(paths.documentTag(accountId, documentId, tagId));
+  removeFromDocument(
+    accountId: string,
+    documentId: string,
+    tagId: string,
+  ): Promise<DetachTagResult> {
+    return this.http.delete<DetachTagResult>(paths.documentTag(accountId, documentId, tagId));
   }
 }

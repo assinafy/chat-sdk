@@ -6,10 +6,10 @@
  *  - Unwrap the `{ status, message, data }` envelope.
  *  - Surface pagination + rate-limit metadata from response headers.
  *  - Map non-2xx responses to typed {@link ApiError} instances.
- *  - Provide retry-with-backoff for transient failures (429 + 5xx).
+ *  - Retry safe, idempotent reads after transient failures (429 + 5xx).
  *
  * This module is intentionally framework-agnostic and uses the global `fetch`
- * available in Node 20+, Bun, Deno, and modern browsers.
+ * available in Node 24+, Bun, Deno, and modern browsers.
  */
 
 import { ApiError, ConfigurationError } from "./errors.js";
@@ -33,8 +33,10 @@ export interface HttpClientOptions {
    */
   fetch?: typeof fetch;
   /**
-   * Number of times to retry transient failures (HTTP 408, 425, 429, 500, 502,
-   * 503, 504, plus network errors). Defaults to 2 (so up to 3 total attempts).
+   * Number of times to retry safe reads after transient failures (HTTP 408,
+   * 425, 429, 500, 502, 503, 504, plus network errors). Mutating requests are
+   * never retried because the API has no idempotency-key contract. Defaults to
+   * 2 (so up to 3 total attempts).
    */
   maxRetries?: number;
   /**
@@ -70,9 +72,11 @@ export interface ResponseWithMeta<T> {
  * User-Agent never drifts from the published version.
  */
 declare const __SDK_VERSION__: string | undefined;
-const VERSION = typeof __SDK_VERSION__ !== "undefined" ? __SDK_VERSION__ : "1.1.0";
+const VERSION = typeof __SDK_VERSION__ !== "undefined" ? __SDK_VERSION__ : "2.0.0";
 const DEFAULT_USER_AGENT = `@assinafy/chat-sdk/${VERSION}`;
 const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
+const RETRYABLE_METHOD = new Set(["GET", "HEAD", "OPTIONS"]);
+const TRANSIENT_ERROR_CODE = new Set(["ECONNRESET", "ETIMEDOUT", "ENOTFOUND", "EAI_AGAIN"]);
 
 /**
  * Thin wrapper around `fetch` that knows how to talk to the Assinafy API.
@@ -83,6 +87,7 @@ const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 export class HttpClient {
   readonly baseUrl: string;
   readonly auth: AuthStrategy;
+  private readonly baseOrigin: string;
   private readonly fetchImpl: typeof fetch;
   private readonly maxRetries: number;
   private readonly retryBaseDelayMs: number;
@@ -100,7 +105,14 @@ export class HttpClient {
       throw new ConfigurationError("HttpClient: bearer auth requires a non-empty token");
     }
 
-    this.baseUrl = options.baseUrl.replace(/\/$/, "");
+    try {
+      const base = new URL(options.baseUrl);
+      if (base.protocol !== "https:" && base.protocol !== "http:") throw new Error("unsupported protocol");
+      this.baseUrl = base.href.replace(/\/$/, "");
+      this.baseOrigin = base.origin;
+    } catch {
+      throw new ConfigurationError("HttpClient requires an absolute HTTP(S) baseUrl");
+    }
     this.auth = options.auth;
     this.fetchImpl = options.fetch ?? globalThis.fetch;
     this.maxRetries = options.maxRetries ?? 2;
@@ -110,7 +122,7 @@ export class HttpClient {
 
     if (!this.fetchImpl) {
       throw new ConfigurationError(
-        "No fetch implementation available. Pass options.fetch or run on Node 20+ / Bun / Deno / a modern browser.",
+        "No fetch implementation available. Pass options.fetch or run on Node 24+ / Bun / Deno / a modern browser.",
       );
     }
   }
@@ -167,46 +179,18 @@ export class HttpClient {
    * generates a boundary).
    */
   async request<T>(path: string, init: RequestInit = {}): Promise<ResponseWithMeta<T>> {
-    const url = this.buildUrl(path);
-    const headers = this.buildHeaders(init);
-
-    let attempt = 0;
-    let lastError: unknown;
-    while (true) {
-      try {
-        const response = await this.fetchImpl(url, { ...init, headers });
-        const rateLimit = readRateLimit(response.headers);
-        if (rateLimit && this.onRateLimit) this.onRateLimit(rateLimit);
-
-        if (response.ok) {
-          return await this.parseSuccess<T>(response, path, rateLimit);
-        }
-
-        if (this.shouldRetry(response.status, attempt)) {
-          await this.sleep(this.backoff(attempt, response.headers));
-          attempt++;
-          continue;
-        }
-
-        await this.throwFromResponse(response, path, init.method ?? "GET");
-      } catch (err) {
-        if (err instanceof ApiError) throw err;
-        if (attempt < this.maxRetries && isLikelyTransient(err)) {
-          await this.sleep(this.backoff(attempt));
-          attempt++;
-          lastError = err;
-          continue;
-        }
-        throw err;
-      }
-    }
-
-    // eslint-disable-next-line no-unreachable -- Kept to satisfy TS's control-flow analysis.
-    throw lastError ?? new Error("HttpClient.request: unreachable");
+    const { response, rateLimit } = await this.send(path, init);
+    return this.parseSuccess<T>(response, redactPath(path), rateLimit);
   }
 
   private buildUrl(path: string): string {
-    if (path.startsWith("http://") || path.startsWith("https://")) return path;
+    if (path.startsWith("http://") || path.startsWith("https://")) {
+      const url = new URL(path);
+      if (url.origin !== this.baseOrigin) {
+        throw new ConfigurationError("HttpClient refuses to send credentials to a different origin");
+      }
+      return url.href;
+    }
     return path.startsWith("/") ? `${this.baseUrl}${path}` : `${this.baseUrl}/${path}`;
   }
 
@@ -276,8 +260,8 @@ export class HttpClient {
     throw new ApiError({ status: response.status, body, path, method, message });
   }
 
-  private shouldRetry(status: number, attempt: number): boolean {
-    return attempt < this.maxRetries && RETRYABLE_STATUS.has(status);
+  private shouldRetry(status: number, attempt: number, method: string): boolean {
+    return attempt < this.maxRetries && RETRYABLE_METHOD.has(method) && RETRYABLE_STATUS.has(status);
   }
 
   private backoff(attempt: number, headers?: Headers): number {
@@ -303,13 +287,44 @@ export class HttpClient {
    * unwrapping. Used by file-download endpoints.
    */
   async rawRequest(path: string, init: RequestInit = {}): Promise<Response> {
+    return (await this.send(path, init)).response;
+  }
+
+  private async send(
+    path: string,
+    init: RequestInit,
+  ): Promise<{ response: Response; rateLimit: RateLimit | undefined }> {
     const url = this.buildUrl(path);
     const headers = this.buildHeaders(init);
-    const response = await this.fetchImpl(url, { ...init, headers });
-    if (!response.ok) {
-      await this.throwFromResponse(response, path, init.method ?? "GET");
+    const method = (init.method ?? "GET").toUpperCase();
+    const safePath = redactPath(path);
+    let attempt = 0;
+
+    while (true) {
+      try {
+        const response = await this.fetchImpl(url, { ...init, method, headers, redirect: "manual" });
+        const rateLimit = readRateLimit(response.headers);
+        if (rateLimit) this.onRateLimit?.(rateLimit);
+        if (response.ok) return { response, rateLimit };
+
+        if (this.shouldRetry(response.status, attempt, method)) {
+          await response.body?.cancel().catch(() => undefined);
+          await this.sleep(this.backoff(attempt, response.headers));
+          attempt++;
+          continue;
+        }
+
+        await this.throwFromResponse(response, safePath, method);
+      } catch (err) {
+        if (err instanceof ApiError || !RETRYABLE_METHOD.has(method)) throw err;
+        if (attempt < this.maxRetries && isLikelyTransient(err)) {
+          await this.sleep(this.backoff(attempt));
+          attempt++;
+          continue;
+        }
+        throw err;
+      }
     }
-    return response;
   }
 }
 
@@ -325,7 +340,11 @@ function withJsonBody(init: RequestInit, method: string, body: unknown): Request
 }
 
 function isEnvelope(value: unknown): value is ApiEnvelope<unknown> {
-  return isRecord(value) && "data" in value && "status" in value && "message" in value;
+  return (
+    isRecord(value) &&
+    typeof value.status === "number" &&
+    typeof value.message === "string"
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -356,7 +375,13 @@ function readRateLimit(headers: Headers): RateLimit | undefined {
 function isLikelyTransient(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;
   const code = (err as { code?: string }).code;
-  return code === "ECONNRESET" || code === "ETIMEDOUT" || code === "ENOTFOUND" || code === "EAI_AGAIN";
+  if (code && TRANSIENT_ERROR_CODE.has(code)) return true;
+  const cause = (err as { cause?: unknown }).cause;
+  return err instanceof TypeError || (cause !== err && isLikelyTransient(cause));
+}
+
+function redactPath(path: string): string {
+  return path.replace(/([?&](?:access-token|signer-access-code)=)[^&]*/gi, "$1[REDACTED]");
 }
 
 /** Internal: append a query object to a path, omitting undefined/null values. */

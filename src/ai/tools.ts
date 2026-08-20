@@ -4,7 +4,8 @@
  * `createChatTools(client)` returns an array of provider-agnostic tool
  * descriptors that expose the most common Assinafy operations as
  * JSON-schema-typed tools. The shape is compatible with both Anthropic's
- * `messages.create({ tools })` and OpenAI's `chat.completions` tool-calling.
+ * Anthropic/OpenAI tool payloads after the small provider-specific reshape
+ * shown in the package documentation.
  *
  * Each tool has:
  *  - `name`            — stable id you pass to the model
@@ -21,11 +22,11 @@
 import type { AssinafyClient } from "../client/index.js";
 import type {
   AssignmentMethod,
-  AssignmentSignerInput,
   CreateAssignmentInput,
   CreateFieldInput,
   CreateSignerInput,
   DocumentStatusCode,
+  EstimateAssignmentSignerInput,
   ListDocumentsQuery,
   ListFieldsQuery,
   ListSignersQuery,
@@ -45,7 +46,7 @@ export interface ChatTool<TArgs = unknown, TResult = unknown> {
   input_schema: Record<string, unknown>;
   /** OpenAI-style alias for `input_schema`. */
   parameters: Record<string, unknown>;
-  /** Run the tool with validated arguments. */
+  /** Validate the arguments against `input_schema`, then run the API call. */
   execute(args: TArgs): Promise<TResult>;
 }
 
@@ -91,7 +92,7 @@ export function createChatTools(
           accountId: accountIdSchema,
           search: { type: "string", description: "Substring filter for full name or email." },
           page: { type: "integer", minimum: 1 },
-          perPage: { type: "integer", minimum: 1, maximum: 200 },
+          perPage: { type: "integer", minimum: 1, maximum: 100 },
         },
         required: accountIdRequired ? ["accountId"] : [],
       },
@@ -141,7 +142,7 @@ export function createChatTools(
 
     schemaTool({
       name: "update_signer",
-      description: "Update a signer's name, email, or WhatsApp number.",
+      description: "Update a signer's name, email, WhatsApp number, or government ID.",
       schema: {
         type: "object",
         properties: {
@@ -150,6 +151,7 @@ export function createChatTools(
           full_name: { type: "string" },
           email: { type: "string", format: "email" },
           whatsapp_phone_number: { type: "string" },
+          government_id: { type: "string" },
         },
         required: accountIdRequired ? ["accountId", "signerId"] : ["signerId"],
       },
@@ -158,6 +160,7 @@ export function createChatTools(
           full_name: args.full_name,
           email: args.email,
           whatsapp_phone_number: args.whatsapp_phone_number,
+          government_id: args.government_id,
         }),
     }),
 
@@ -193,13 +196,14 @@ export function createChatTools(
             ],
           },
           search: { type: "string" },
+          method: { type: "string", enum: ["virtual", "collect"] },
           tags: {
             description: "Tag id(s) to filter by.",
             anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }],
           },
-          sort: { type: "string", description: "Sort string accepted by the API, e.g. `-created_at`." },
+          sort: { type: "string", enum: ["name", "updated_at"] },
           page: { type: "integer", minimum: 1 },
-          perPage: { type: "integer", minimum: 1, maximum: 200 },
+          perPage: { type: "integer", minimum: 1, maximum: 100 },
         },
         required: accountIdRequired ? ["accountId"] : [],
       },
@@ -207,6 +211,7 @@ export function createChatTools(
         client.documents.list(accountIdOrDefault(args.accountId), {
           status: args.status as DocumentStatusCode | DocumentStatusCode[] | undefined,
           search: args.search,
+          method: args.method,
           tags: args.tags,
           sort: args.sort,
           page: args.page,
@@ -279,7 +284,7 @@ export function createChatTools(
             ],
           },
           page: { type: "integer", minimum: 1 },
-          perPage: { type: "integer", minimum: 1, maximum: 200 },
+          perPage: { type: "integer", minimum: 1, maximum: 100 },
         },
         required: accountIdRequired ? ["accountId"] : [],
       },
@@ -320,22 +325,25 @@ export function createChatTools(
           },
           signer_ids: {
             type: "array",
+            minItems: 1,
             items: { type: "string" },
             description: "Legacy signer ID list. Prefer `signers` for new integrations.",
           },
           signerIds: {
             type: "array",
+            minItems: 1,
             items: { type: "string" },
             description: "Deprecated alias for `signer_ids`.",
           },
           signers: {
             type: "array",
+            minItems: 1,
             items: ASSIGNMENT_SIGNER_SCHEMA,
             description: "Existing signer configurations. For creation, each entry must include `id`.",
           },
           entries: {
             type: "array",
-            items: { type: "object", additionalProperties: true },
+            items: ASSIGNMENT_ENTRY_SCHEMA,
             description: "Collect-method field placement entries.",
           },
           message: { type: "string" },
@@ -343,6 +351,11 @@ export function createChatTools(
           copy_receivers: { type: "array", items: { type: "string" } },
         },
         required: ["documentId", "method"],
+        anyOf: [
+          { required: ["signers"] },
+          { required: ["signer_ids"] },
+          { required: ["signerIds"] },
+        ],
       },
       execute: async (args: CreateAssignmentInput & { documentId: string; method: AssignmentMethod }) =>
         client.assignments.create(args.documentId, {
@@ -365,20 +378,20 @@ export function createChatTools(
         properties: {
           documentId: { type: "string" },
           method: { type: "string", enum: ["virtual", "collect"] },
-          signers: { type: "array", items: ASSIGNMENT_SIGNER_SCHEMA },
-          signer_ids: { type: "array", items: { type: "string" } },
+          signers: { type: "array", minItems: 1, items: ESTIMATE_ASSIGNMENT_SIGNER_SCHEMA },
+          signer_ids: { type: "array", minItems: 1, items: { type: "string" } },
           entries: {
             type: "array",
-            items: { type: "object", additionalProperties: true },
+            items: ASSIGNMENT_ENTRY_SCHEMA,
             description: "Collect-method field placement entries.",
           },
         },
-        required: ["documentId", "method"],
+        required: ["documentId"],
       },
       execute: async (args: {
         documentId: string;
-        method: AssignmentMethod;
-        signers?: AssignmentSignerInput[];
+        method?: AssignmentMethod;
+        signers?: EstimateAssignmentSignerInput[];
         signer_ids?: string[];
         entries?: CreateAssignmentInput["entries"];
       }) =>
@@ -427,8 +440,16 @@ export function createChatTools(
           templateId: { type: "string" },
           name: { type: "string" },
           message: { type: "string" },
-          signers: { type: "array", items: TEMPLATE_SIGNER_SCHEMA },
+          signers: { type: "array", minItems: 1, items: TEMPLATE_SIGNER_SCHEMA },
           tags: { type: "array", items: { type: "string" } },
+          editor_fields: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: { field_id: { type: "string" }, value: { type: "string" } },
+              required: ["field_id", "value"],
+            },
+          },
           expires_at: { type: "string", format: "date-time" },
         },
         required: accountIdRequired ? ["accountId", "templateId", "signers"] : ["templateId", "signers"],
@@ -441,6 +462,7 @@ export function createChatTools(
         signers: TemplateSignerInput[];
         tags?: string[];
         expires_at?: string;
+        editor_fields?: Array<{ field_id: string; value: string }>;
       }) =>
         client.templates.instantiate(accountIdOrDefault(args.accountId), args.templateId, {
           name: args.name,
@@ -448,6 +470,7 @@ export function createChatTools(
           signers: args.signers,
           tags: args.tags,
           expires_at: args.expires_at,
+          editor_fields: args.editor_fields,
         }),
     }),
 
@@ -481,7 +504,7 @@ export function createChatTools(
 
     schemaTool({
       name: "tag_document",
-      description: "Replace the tags attached to a document with the given tag names.",
+      description: "Replace the tags attached to a document with the given tag IDs.",
       schema: {
         type: "object",
         properties: {
@@ -490,20 +513,19 @@ export function createChatTools(
           tags: {
             type: "array",
             items: { type: "string" },
-            description: "Tag names. Unknown names are created by the API.",
+            description: "Legacy alias accepted by older sandbox deployments.",
           },
           tagIds: {
             type: "array",
             items: { type: "string" },
-            description: "Deprecated alias for `tags`.",
+            description: "Current API tag IDs.",
           },
         },
-        required: accountIdRequired
-          ? ["accountId", "documentId", "tags"]
-          : ["documentId", "tags"],
+        required: accountIdRequired ? ["accountId", "documentId"] : ["documentId"],
+        anyOf: [{ required: ["tagIds"] }, { required: ["tags"] }],
       },
       execute: async (args: { accountId?: string; documentId: string; tags?: string[]; tagIds?: string[] }) =>
-        client.tags.setForDocument(accountIdOrDefault(args.accountId), args.documentId, args.tags ?? args.tagIds ?? []),
+        client.tags.setForDocument(accountIdOrDefault(args.accountId), args.documentId, args.tagIds ?? args.tags ?? []),
     }),
 
     schemaTool({
@@ -515,9 +537,6 @@ export function createChatTools(
           accountId: accountIdSchema,
           include_inactive: { type: "boolean" },
           include_standard: { type: "boolean" },
-          search: { type: "string" },
-          page: { type: "integer", minimum: 1 },
-          perPage: { type: "integer", minimum: 1, maximum: 200 },
         },
         required: accountIdRequired ? ["accountId"] : [],
       },
@@ -525,9 +544,6 @@ export function createChatTools(
         client.fields.list(accountIdOrDefault(args.accountId), {
           include_inactive: args.include_inactive,
           include_standard: args.include_standard,
-          search: args.search,
-          page: args.page,
-          perPage: args.perPage,
         }),
     }),
 
@@ -540,9 +556,8 @@ export function createChatTools(
           accountId: accountIdSchema,
           type: { type: "string" },
           name: { type: "string" },
-          regex: { type: "string" },
+          regex: { type: ["string", "null"] },
           is_required: { type: "boolean" },
-          is_active: { type: "boolean" },
         },
         required: accountIdRequired ? ["accountId", "type", "name"] : ["type", "name"],
       },
@@ -552,7 +567,6 @@ export function createChatTools(
           name: args.name,
           regex: args.regex,
           is_required: args.is_required,
-          is_active: args.is_active,
         }),
     }),
 
@@ -579,20 +593,16 @@ export function createChatTools(
         properties: {
           accountId: accountIdSchema,
           fieldId: { type: "string" },
-          type: { type: "string" },
           name: { type: "string" },
           regex: { type: ["string", "null"] },
-          is_required: { type: "boolean" },
           is_active: { type: "boolean" },
         },
         required: accountIdRequired ? ["accountId", "fieldId"] : ["fieldId"],
       },
       execute: async (args: UpdateFieldInput & { accountId?: string; fieldId: string }) =>
         client.fields.update(accountIdOrDefault(args.accountId), args.fieldId, {
-          type: args.type,
           name: args.name,
           regex: args.regex,
-          is_required: args.is_required,
           is_active: args.is_active,
         }),
     }),
@@ -733,7 +743,7 @@ export function createChatTools(
           from: { type: "integer" },
           to: { type: "integer" },
           page: { type: "integer", minimum: 1 },
-          perPage: { type: "integer", minimum: 1, maximum: 200 },
+          perPage: { type: "integer", minimum: 1, maximum: 100 },
         },
         required: accountIdRequired ? ["accountId"] : [],
       },
@@ -766,21 +776,30 @@ export function createChatTools(
     schemaTool({
       name: "send_public_token",
       description:
-        "Ask Assinafy to deliver a fresh public access token to a recipient (e.g. resend the signature link).",
+        "Ask Assinafy to email a fresh public document access token.",
       schema: {
         type: "object",
         properties: {
           documentId: { type: "string" },
+          email: { type: "string", format: "email" },
           recipient: { type: "string" },
           channel: { type: "string", enum: ["email", "whatsapp"] },
         },
-        required: ["documentId", "recipient", "channel"],
+        required: ["documentId"],
+        anyOf: [{ required: ["email"] }, { required: ["recipient", "channel"] }],
       },
-      execute: async (args: { documentId: string; recipient: string; channel: "email" | "whatsapp" }) =>
-        client.documents.sendPublicToken(args.documentId, {
-          recipient: args.recipient,
-          channel: args.channel,
-        }),
+      execute: async (args: {
+        documentId: string;
+        email?: string;
+        recipient?: string;
+        channel?: "email" | "whatsapp";
+      }) =>
+        client.documents.sendPublicToken(
+          args.documentId,
+          args.email
+            ? { email: args.email }
+            : { recipient: args.recipient!, channel: args.channel! },
+        ),
     }),
 
     schemaTool({
@@ -841,10 +860,10 @@ const TEMPLATE_SIGNER_SCHEMA = {
     role_id: { type: "string" },
     id: { type: "string", description: "Existing signer id." },
     step: { type: "integer", minimum: 1 },
-    verification_method: { type: "string" },
-    notification_methods: { type: "array", items: { type: "string" } },
+    verification_method: { type: "string", enum: ["Email", "Whatsapp", "DigitalCertificate"] },
+    notification_methods: { type: "array", items: { type: "string", enum: ["Email", "Whatsapp"] } },
   },
-  required: ["role_id"],
+  required: ["role_id", "id"],
 } as const;
 
 const ASSIGNMENT_SIGNER_SCHEMA = {
@@ -852,10 +871,50 @@ const ASSIGNMENT_SIGNER_SCHEMA = {
   properties: {
     id: { type: "string", description: "Existing signer id." },
     step: { type: "integer", minimum: 1 },
-    verification_method: { type: "string" },
-    notification_methods: { type: "array", items: { type: "string" } },
+    verification_method: { type: "string", enum: ["Email", "Whatsapp", "DigitalCertificate"] },
+    notification_methods: { type: "array", items: { type: "string", enum: ["Email", "Whatsapp"] } },
   },
-  required: [],
+  required: ["id"],
+} as const;
+
+const ESTIMATE_ASSIGNMENT_SIGNER_SCHEMA = {
+  type: "object",
+  properties: {
+    verification_method: { type: "string", enum: ["Email", "Whatsapp", "DigitalCertificate"] },
+    notification_methods: { type: "array", items: { type: "string", enum: ["Email", "Whatsapp"] } },
+  },
+} as const;
+
+const ASSIGNMENT_ENTRY_SCHEMA = {
+  type: "object",
+  properties: {
+    page_id: { type: "string" },
+    fields: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          signer_id: { type: "string" },
+          field_id: { type: "string" },
+          display_settings: {
+            type: "object",
+            properties: {
+              left: { type: "number" },
+              top: { type: "number" },
+              width: { type: "number" },
+              height: { type: "number" },
+              fontSize: { type: "number" },
+              fontFamily: { type: "string" },
+              backgroundColor: { type: "string" },
+            },
+            required: ["left", "top", "width", "height", "fontSize"],
+          },
+        },
+        required: ["signer_id", "field_id", "display_settings"],
+      },
+    },
+  },
+  required: ["page_id", "fields"],
 } as const;
 
 /** Helper that builds a {@link ChatTool} from a JSON schema. */
@@ -870,6 +929,102 @@ function schemaTool<TArgs, TResult>(input: {
     description: input.description,
     input_schema: input.schema,
     parameters: input.schema,
-    execute: input.execute,
+    execute: async (args) => {
+      assertSchema(input.schema, args, input.name);
+      return input.execute(args);
+    },
   };
+}
+
+function assertSchema(schema: Record<string, unknown>, value: unknown, path: string): void {
+  const alternatives = schema.anyOf;
+  if (Array.isArray(alternatives)) {
+    const matches = alternatives.some((candidate) => {
+      try {
+        if (!isRecord(candidate)) return false;
+        assertSchema(candidate, value, path);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    if (!matches) throw new TypeError(`${path}: arguments do not match any allowed shape`);
+  }
+
+  const types = Array.isArray(schema.type) ? schema.type : schema.type ? [schema.type] : [];
+  if (types.length && !types.some((type) => matchesType(type, value))) {
+    throw new TypeError(`${path}: expected ${types.join(" or ")}`);
+  }
+
+  if (Array.isArray(schema.enum) && !schema.enum.includes(value)) {
+    throw new TypeError(`${path}: expected one of ${schema.enum.join(", ")}`);
+  }
+
+  if (typeof value === "number") {
+    if (typeof schema.minimum === "number" && value < schema.minimum) {
+      throw new TypeError(`${path}: must be at least ${schema.minimum}`);
+    }
+    if (typeof schema.maximum === "number" && value > schema.maximum) {
+      throw new TypeError(`${path}: must be at most ${schema.maximum}`);
+    }
+  }
+
+  if (typeof value === "string" && typeof schema.format === "string") {
+    if (schema.format === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+      throw new TypeError(`${path}: invalid email`);
+    }
+    if (schema.format === "uri") {
+      try {
+        new URL(value);
+      } catch {
+        throw new TypeError(`${path}: invalid URI`);
+      }
+    }
+    if (schema.format === "date-time" && !Number.isFinite(Date.parse(value))) {
+      throw new TypeError(`${path}: invalid date-time`);
+    }
+  }
+
+  if (Array.isArray(value) && isRecord(schema.items)) {
+    if (typeof schema.minItems === "number" && value.length < schema.minItems) {
+      throw new TypeError(`${path}: must contain at least ${schema.minItems} item(s)`);
+    }
+    if (typeof schema.maxItems === "number" && value.length > schema.maxItems) {
+      throw new TypeError(`${path}: must contain at most ${schema.maxItems} item(s)`);
+    }
+    value.forEach((item, index) => assertSchema(schema.items as Record<string, unknown>, item, `${path}[${index}]`));
+  }
+
+  if (isRecord(value)) {
+    const required = Array.isArray(schema.required) ? schema.required : [];
+    for (const key of required) {
+      if (typeof key === "string" && (!(key in value) || value[key] === undefined)) {
+        throw new TypeError(`${path}.${key}: required`);
+      }
+    }
+    if (isRecord(schema.properties)) {
+      for (const [key, propertySchema] of Object.entries(schema.properties)) {
+        if (value[key] !== undefined && isRecord(propertySchema)) {
+          assertSchema(propertySchema, value[key], `${path}.${key}`);
+        }
+      }
+    }
+  }
+}
+
+function matchesType(type: unknown, value: unknown): boolean {
+  switch (type) {
+    case "object": return isRecord(value);
+    case "array": return Array.isArray(value);
+    case "string": return typeof value === "string";
+    case "boolean": return typeof value === "boolean";
+    case "number": return typeof value === "number" && Number.isFinite(value);
+    case "integer": return typeof value === "number" && Number.isInteger(value);
+    case "null": return value === null;
+    default: return true;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

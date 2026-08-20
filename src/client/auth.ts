@@ -8,10 +8,11 @@
  * @see https://api.assinafy.com.br/v1/docs
  */
 
-import { HttpClient } from "./http.js";
+import type { HttpClient } from "./http.js";
 import type {
   ApiKeyRecord,
   ChangePasswordInput,
+  EmailResult,
   LinkSocialLoginInput,
   LoginInput,
   LoginResponse,
@@ -28,7 +29,7 @@ export class AuthResource {
     return this.http.post<LoginResponse>("/login", input);
   }
 
-  /** Sign in / register via a social provider (Google, Apple, …). */
+  /** Sign in or register with a Google identity token. */
   socialLogin(input: SocialLoginInput): Promise<LoginResponse> {
     return this.http.post<LoginResponse>("/authentication/social-login", input);
   }
@@ -69,17 +70,17 @@ export class AuthResource {
   }
 
   /** Change the current user's password. */
-  async changePassword(input: ChangePasswordInput): Promise<void> {
-    await this.http.put<unknown>("/authentication/change-password", input);
+  changePassword(input: ChangePasswordInput): Promise<EmailResult> {
+    return this.http.put<EmailResult>("/authentication/change-password", input);
   }
 
   /** Trigger a password-reset email. */
-  async requestPasswordReset(input: RequestPasswordResetInput): Promise<void> {
-    await this.http.put<unknown>("/authentication/request-password-reset", input);
+  requestPasswordReset(input: RequestPasswordResetInput): Promise<EmailResult> {
+    return this.http.put<EmailResult>("/authentication/request-password-reset", input);
   }
 
   /** Complete a password reset using the token from the reset email. */
-  async resetPassword(input: ResetPasswordInput): Promise<void> {
-    await this.http.put<unknown>("/authentication/reset-password", input);
+  resetPassword(input: ResetPasswordInput): Promise<EmailResult> {
+    return this.http.put<EmailResult>("/authentication/reset-password", input);
   }
 }

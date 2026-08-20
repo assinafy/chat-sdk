@@ -1,0 +1,4 @@
+# Protect automation and this ownership rule with maintainer review.
+/.github/** billm@billm.org
+/package.json billm@billm.org
+/package-lock.json billm@billm.org

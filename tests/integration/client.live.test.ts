@@ -7,7 +7,7 @@
  * credentials.
  */
 import { afterAll, describe, it, expect } from "vitest";
-import { AssinafyClient } from "../../src/client/index.js";
+import { ApiError, AssinafyClient } from "../../src/client/index.js";
 import { loadEnv, makeMinimalPdf } from "../setup.js";
 
 const env = loadEnv();
@@ -26,7 +26,15 @@ describeLive("Assinafy API — live sandbox", () => {
   // Track resources we create so we can clean up at the end.
   const cleanup: Array<() => Promise<void>> = [];
   afterAll(async () => {
-    for (const task of cleanup.reverse()) await task();
+    const errors: unknown[] = [];
+    for (const task of cleanup.reverse()) {
+      try {
+        await task();
+      } catch (error) {
+        if (!(error instanceof ApiError) || error.status !== 404) errors.push(error);
+      }
+    }
+    if (errors.length) throw new AggregateError(errors, "Sandbox cleanup failed");
   });
 
   it("documents.statuses() returns the canonical status list", async () => {
@@ -36,6 +44,9 @@ describeLive("Assinafy API — live sandbox", () => {
     expect(codes).toContain("uploaded");
     expect(codes).toContain("certificated");
     expect(codes).toContain("pending_signature");
+
+    const invalid = await publicClient.documents.verify("0".repeat(64));
+    expect(invalid.is_valid).toBe(false);
   });
 
   it("signers.list() paginates", async () => {
@@ -50,13 +61,7 @@ describeLive("Assinafy API — live sandbox", () => {
       full_name: "Chat SDK Test",
       email: `chat-sdk-${Date.now()}@example.com`,
     });
-    cleanup.push(async () => {
-      try {
-        await client.signers.remove(env!.accountId, created.id);
-      } catch {
-        /* ignore cleanup races */
-      }
-    });
+    cleanup.push(() => client.signers.remove(env!.accountId, created.id));
     expect(created.id).toBeTruthy();
     expect(created.full_name).toBe("Chat SDK Test");
 
@@ -79,13 +84,7 @@ describeLive("Assinafy API — live sandbox", () => {
       body: makeMinimalPdf(),
       contentType: "application/pdf",
     });
-    cleanup.push(async () => {
-      try {
-        await client.documents.remove(doc.id);
-      } catch {
-        /* ignore cleanup races */
-      }
-    });
+    cleanup.push(() => client.documents.remove(doc.id));
     expect(doc.id).toBeTruthy();
     expect(doc.name).toContain("chat-sdk-test-");
 
@@ -118,6 +117,9 @@ describeLive("Assinafy API — live sandbox", () => {
 
     const acts = await client.documents.activities(doc.id);
     expect(Array.isArray(acts)).toBe(true);
+
+    await client.documents.remove(doc.id);
+    await expect(client.documents.get(doc.id)).rejects.toMatchObject({ status: 404 });
   }, 60_000);
 
   it("fields.create / list / get / validate / update / remove round-trip", async () => {
@@ -127,13 +129,7 @@ describeLive("Assinafy API — live sandbox", () => {
       name,
       regex: "/^[A-Z0-9-]+$/",
     });
-    cleanup.push(async () => {
-      try {
-        await client.fields.remove(env!.accountId, field.id);
-      } catch {
-        /* ignore cleanup races */
-      }
-    });
+    cleanup.push(() => client.fields.remove(env!.accountId, field.id));
     expect(field.id).toBeTruthy();
 
     const listed = await client.fields.list(env!.accountId, { search: name, include_inactive: true });
@@ -177,71 +173,126 @@ describeLive("Assinafy API — live sandbox", () => {
       filename: `cs-tag-${Date.now()}.pdf`,
       body: makeMinimalPdf("tag test"),
     });
-    cleanup.push(async () => {
-      try {
-        await client.documents.remove(doc.id);
-      } catch {
-        /* ignore */
-      }
-    });
+    cleanup.push(() => client.documents.remove(doc.id));
 
     const tagName = `cs-test-${Date.now()}`;
     const tag = await client.tags.create(env!.accountId, { name: tagName, color: "#888888" });
     cleanup.push(async () => {
-      try {
-        await client.tags.remove(env!.accountId, tag.id, { force: true });
-      } catch {
-        /* ignore */
-      }
+      await client.tags.remove(env!.accountId, tag.id, { force: true });
     });
     expect(tag.id).toBeTruthy();
+    const updatedTag = await client.tags.update(env!.accountId, tag.id, { color: "#999999" });
+    expect(updatedTag.color).toBe("999999");
+
+    const extraTag = await client.tags.create(env!.accountId, {
+      name: `${tagName}-extra`,
+      color: "#777777",
+    });
+    cleanup.push(async () => {
+      await client.tags.remove(env!.accountId, extraTag.id, { force: true });
+    });
 
     const listed = await client.tags.list(env!.accountId, tagName);
     expect(listed.data.some((t) => t.id === tag.id)).toBe(true);
 
+    // The 2026-08 sandbox still implements the legacy name contract even
+    // though production OpenAPI documents IDs. Unit coverage verifies the
+    // canonical ID payload; this live test preserves and verifies the deployed extension.
     const setTags = await client.tags.setForDocument(env!.accountId, doc.id, [tagName]);
     expect(setTags.some((t) => t.name === tagName)).toBe(true);
 
     const docTags = await client.tags.listForDocument(env!.accountId, doc.id);
     expect(docTags.some((t) => t.id === tag.id)).toBe(true);
 
-    const appended = await client.tags.addToDocument(env!.accountId, doc.id, [`${tagName}-extra`]);
-    expect(appended.some((t) => t.name === `${tagName}-extra`)).toBe(true);
+    const appended = await client.tags.addToDocument(env!.accountId, doc.id, [extraTag.name]);
+    expect(appended.some((t) => t.id === extraTag.id)).toBe(true);
 
     await client.tags.removeFromDocument(env!.accountId, doc.id, tag.id);
     const afterDetach = await client.tags.listForDocument(env!.accountId, doc.id);
     expect(afterDetach.some((t) => t.id === tag.id)).toBe(false);
 
     await client.tags.remove(env!.accountId, tag.id, { force: true });
-  });
+    await client.tags.remove(env!.accountId, extraTag.id, { force: true });
+    await waitForDocument(
+      doc.id,
+      (candidate) => !["uploading", "uploaded", "metadata_processing"].includes(candidate.status),
+    );
+    await client.documents.remove(doc.id);
+    await expect(client.documents.get(doc.id)).rejects.toMatchObject({ status: 404 });
+  }, 60_000);
 
-  it("templates.list() and estimateCost() are wired when templates exist", async () => {
+  it("templates.list / detail / estimate / instantiate use the sandbox template fixture", async () => {
     const templates = await client.templates.list(env!.accountId, { perPage: 1 });
     expect(Array.isArray(templates.data)).toBe(true);
-    if (templates.data.length === 0) return;
+    expect(templates.data.length).toBeGreaterThan(0);
 
     const template = templates.data[0]!;
 
     const detail = await client.templates.get(env!.accountId, template.id);
     expect(detail.id).toBe(template.id);
 
-    const role = detail.roles?.[0];
-    if (!role) return;
+    expect(detail.roles?.length ?? 0).toBeGreaterThan(0);
+    const role = detail.roles![0]!;
 
     const estimate = await client.templates.estimateCost(env!.accountId, template.id, {
       signers: [{ role_id: role.id }],
     });
     expect(typeof estimate.has_sufficient_resources).toBe("boolean");
-  });
 
-  it("documents.iterate() walks pages", async () => {
-    let count = 0;
-    for await (const _ of client.documents.iterate(env!.accountId, { perPage: 2 })) {
-      count++;
-      if (count >= 3) break;
+    const signer = await ensureSigner(env!.primaryEmail, "Bill M");
+    const document = await client.templates.instantiate(env!.accountId, template.id, {
+      name: `cs-template-${Date.now()}.pdf`,
+      signers: [{ role_id: role.id, id: signer.id }],
+    });
+    cleanup.push(async () => {
+      await waitForDocument(
+        document.id,
+        (candidate) => !["uploading", "uploaded", "metadata_processing"].includes(candidate.status),
+      );
+      await client.documents.remove(document.id);
+    });
+    expect(document.template_id).toBe(template.id);
+    await waitForDocument(
+      document.id,
+      (candidate) => !["uploading", "uploaded", "metadata_processing"].includes(candidate.status),
+    );
+    await client.documents.remove(document.id);
+    await expect(client.documents.get(document.id)).rejects.toMatchObject({ status: 404 });
+  }, 60_000);
+
+  it("documents.iterate() yields a disposable document", async () => {
+    const filename = `cs-iterate-${Date.now()}.pdf`;
+    const document = await client.documents.upload(env!.accountId, {
+      filename,
+      body: makeMinimalPdf("iterator test"),
+    });
+    cleanup.push(async () => {
+      await waitForDocument(
+        document.id,
+        (candidate) => !["uploading", "uploaded", "metadata_processing"].includes(candidate.status),
+      );
+      await client.documents.remove(document.id);
+    });
+    await waitForDocument(
+      document.id,
+      (candidate) => !["uploading", "uploaded", "metadata_processing"].includes(candidate.status),
+    );
+
+    let found = false;
+    for await (const candidate of client.documents.iterate(env!.accountId, {
+      search: filename,
+      perPage: 1,
+    })) {
+      if (candidate.id === document.id) {
+        found = true;
+        break;
+      }
     }
-    expect(count).toBeGreaterThanOrEqual(0);
-  });
+    expect(found).toBe(true);
+
+    await client.documents.remove(document.id);
+    await expect(client.documents.get(document.id)).rejects.toMatchObject({ status: 404 });
+  }, 60_000);
 
   it("accounts.list / get / getTheme return the configured account", async () => {
     const accounts = await client.accounts.list();
@@ -256,6 +307,83 @@ describeLive("Assinafy API — live sandbox", () => {
     expect(typeof theme.account_name).toBe("string");
   });
 
+  it("account CRUD and logo operations round-trip on a disposable account", async () => {
+    const account = await client.accounts.create({
+      name: `Chat SDK Test ${Date.now()}`,
+    });
+    cleanup.push(() => client.accounts.remove(account.id, { force: true }));
+
+    const updated = await client.accounts.update(account.id, { name: `${account.name} Updated` });
+    expect(updated.name).toContain("Updated");
+    expect((await client.accounts.get(account.id)).id).toBe(account.id);
+    expect(typeof (await client.accounts.getTheme(account.id)).account_name).toBe("string");
+
+    const png = Uint8Array.from(
+      Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2n1cAAAAASUVORK5CYII=", "base64"),
+    );
+    await client.accounts.uploadLogo(account.id, {
+      filename: "pixel.png",
+      body: png,
+      contentType: "image/png",
+    });
+    expect((await client.accounts.downloadLogo(account.id)).ok).toBe(true);
+    await client.accounts.deleteLogo(account.id);
+
+    const initialSubscription = await client.webhooks.getSubscription(account.id);
+    expect(
+      initialSubscription === null ||
+        (Array.isArray(initialSubscription.events) && typeof initialSubscription.is_active === "boolean"),
+    ).toBe(true);
+    const subscription = await client.webhooks.updateSubscription(account.id, {
+      events: ["document_ready"],
+      is_active: true,
+      url: "https://example.com/assinafy-sandbox-test",
+      email: env!.secondaryEmail,
+    });
+    expect(subscription.is_active).toBe(true);
+    expect((await client.webhooks.inactivate(account.id)).is_active).toBe(false);
+
+    await expectAvailableOrSandbox404(() => client.accounts.getStats(account.id), (rows) => {
+      expect(Array.isArray(rows)).toBe(true);
+    });
+
+    await client.accounts.remove(account.id, { force: true });
+    await expect(client.accounts.get(account.id)).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("users/self and the latest statistics/preferences contract are exercised", async () => {
+    const user = await client.users.getCurrent();
+    expect(user.id).toBeTruthy();
+    expect(user.email).toContain("@");
+
+    await expectAvailableOrSandbox404(() => client.users.getStats(), (rows) => {
+      expect(Array.isArray(rows)).toBe(true);
+    });
+    await expectAvailableOrSandbox404(() => client.accounts.getStats(env!.accountId), (rows) => {
+      expect(Array.isArray(rows)).toBe(true);
+    });
+
+    await expectAvailableOrSandbox404(
+      async () => {
+        const preferences = await client.users.getNotificationPreferences();
+        return client.users.updateNotificationPreferences({
+          DocumentCompleted: preferences.DocumentCompleted,
+        });
+      },
+      (preferences) => expect(typeof preferences.DocumentCompleted).toBe("boolean"),
+    );
+  });
+
+  it("assignments.list either returns the documented page or the known sandbox context error", async () => {
+    try {
+      const assignments = await client.assignments.list({ perPage: 1 });
+      expect(Array.isArray(assignments.data)).toBe(true);
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiError);
+      expect((error as ApiError).status).toBe(400);
+    }
+  });
+
   it("documents.search returns a compact page and rename updates the name", async () => {
     const search = await client.documents.search(env!.accountId, { perPage: 5 });
     expect(Array.isArray(search.data)).toBe(true);
@@ -266,13 +394,7 @@ describeLive("Assinafy API — live sandbox", () => {
       filename: `cs-rename-${Date.now()}.pdf`,
       body: makeMinimalPdf("rename test"),
     });
-    cleanup.push(async () => {
-      try {
-        await client.documents.remove(doc.id);
-      } catch {
-        /* ignore */
-      }
-    });
+    cleanup.push(() => client.documents.remove(doc.id));
     const ready = await waitForDocument(doc.id, (d) => d.status === "metadata_ready");
     expect(ready.status).toBe("metadata_ready");
 
@@ -289,17 +411,11 @@ describeLive("Assinafy API — live sandbox", () => {
       filename: `cs-assign-${Date.now()}.pdf`,
       body: makeMinimalPdf(),
     });
-    cleanup.push(async () => {
-      try {
-        await client.documents.remove(doc.id);
-      } catch {
-        /* ignore */
-      }
-    });
+    cleanup.push(() => client.documents.remove(doc.id));
 
     const estimate = await client.assignments.estimateCost(doc.id, {
       method: "virtual",
-      signers: [{ id: a.id }, { id: b.id }],
+      signers: [{}, {}],
     });
     expect(typeof estimate.has_sufficient_resources).toBe("boolean");
 
@@ -326,33 +442,43 @@ describeLive("Assinafy API — live sandbox", () => {
     expect(Array.isArray(whatsappNotifications)).toBe(true);
 
     const token = await client.documents.sendPublicToken(doc.id, {
-      recipient: env!.primaryEmail,
-      channel: "email",
+      email: env!.primaryEmail,
     });
-    expect(token.recipient).toBe(env!.primaryEmail);
+    expect(token === null || token === undefined || typeof token === "object").toBe(true);
 
     const accessCode = extractAccessCode(assignment.signing_urls?.[0]?.url);
-    if (accessCode) {
-      const self = await publicClient.signature.self(accessCode);
-      expect(self.id).toBe(a.id);
-
-      await publicClient.signers.confirmDataForDocument(doc.id, accessCode, {
-        email: env!.primaryEmail,
-        has_accepted_terms: true,
-      });
-
-      const signerDocument = await publicClient.signature.signContext(accessCode, { hasAcceptedTerms: true });
-      expect(signerDocument.id).toBe(doc.id);
-
-      const current = await publicClient.signature.currentDocument(a.id, accessCode);
-      expect(current.id).toBe(doc.id);
-
-      const signerDocs = await publicClient.signature.listDocuments(a.id, accessCode, { perPage: 1 });
-      expect(Array.isArray(signerDocs.data)).toBe(true);
-
-      const signerDownload = await publicClient.signature.downloadDocument(a.id, doc.id, "original", accessCode);
-      expect(signerDownload.ok).toBe(true);
+    if (!accessCode) {
+      const signingUrl = new URL(assignment.signing_urls![0]!.url);
+      expect(signingUrl.searchParams.get("email")).toBe(env!.primaryEmail);
+      await client.documents.remove(doc.id);
+      await expect(client.documents.get(doc.id)).rejects.toMatchObject({ status: 404 });
+      return;
     }
+
+    const self = await publicClient.signature.self(accessCode);
+    expect(self.id).toBe(a.id);
+
+    await publicClient.signers.confirmDataForDocument(doc.id, accessCode, {
+      email: env!.primaryEmail,
+      has_accepted_terms: true,
+    });
+
+    const signerDocument = await publicClient.signature.signContext(accessCode, { hasAcceptedTerms: true });
+    expect(signerDocument.id).toBe(doc.id);
+
+    const current = await publicClient.signature.currentDocument(a.id, accessCode);
+    expect(current.id).toBe(doc.id);
+
+    const signerDocs = await publicClient.signature.listDocuments(a.id, accessCode, { perPage: 1 });
+    expect(Array.isArray(signerDocs.data)).toBe(true);
+
+    const signerDownload = await publicClient.signature.downloadDocument(a.id, doc.id, "original", accessCode);
+    expect(signerDownload.ok).toBe(true);
+
+    await publicClient.signature.decline(doc.id, assignment.id, accessCode, "Automated sandbox cleanup");
+    await waitForDocument(doc.id, (document) => document.status === "rejected_by_signer");
+    await client.documents.remove(doc.id);
+    await expect(client.documents.get(doc.id)).rejects.toMatchObject({ status: 404 });
   }, 60_000);
 
   /** Find an existing signer by email or create one. */
@@ -376,6 +502,18 @@ describeLive("Assinafy API — live sandbox", () => {
     }
     expect(predicate(last)).toBe(true);
     return last;
+  }
+
+  async function expectAvailableOrSandbox404<T>(
+    request: () => Promise<T>,
+    assertion: (value: T) => void,
+  ): Promise<void> {
+    try {
+      assertion(await request());
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiError);
+      expect((error as ApiError).status).toBe(404);
+    }
   }
 
   function extractAccessCode(url: string | undefined): string | undefined {

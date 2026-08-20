@@ -4,7 +4,6 @@ export default defineConfig({
   test: {
     globals: false,
     environment: "node",
-    setupFiles: ["tests/setup.ts"],
     testTimeout: 30_000,
     hookTimeout: 30_000,
     include: ["tests/**/*.test.ts"],
@@ -13,6 +12,12 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "html"],
       include: ["src/**/*.ts"],
+      thresholds: {
+        lines: 90,
+        functions: 90,
+        branches: 75,
+        statements: 90,
+      },
     },
   },
 });

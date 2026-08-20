@@ -8,6 +8,7 @@ import {
   Button,
   Fields,
   Actions,
+  Image,
   Section,
   Table,
   Select,
@@ -142,5 +143,43 @@ describe("renderers", () => {
     const md = renderMarkdown(t);
     expect(md).toContain("| A\\|x | B |");
     expect(md).toContain("| line1<br>line2 | a \\| b |");
+  });
+
+  it("renders every card primitive in text, markdown, and HTML", () => {
+    const all = Card({
+      title: "All elements",
+      children: [
+        Card({ children: [Text("nested")] }),
+        Heading(3, "Heading"),
+        Text("Text"),
+        Divider(),
+        Section({ label: "Section", children: [Text("inside")] }),
+        Fields([{ label: "Status", value: "ready" }]),
+        LinkButton({ label: "Open", url: "https://example.com" }),
+        Button({ id: "approve", label: "Approve", value: "yes" }),
+        Actions([Button({ id: "cancel", label: "Cancel" })]),
+        Image({ url: "https://example.com/image.png", alt: "Preview" }),
+        Table({ headers: ["A", "B", "C"], rows: [["1", "2", "3"]], align: ["left", "center", "right"] }),
+        Select({
+          id: "select",
+          label: "Choose",
+          placeholder: "Select one",
+          options: [{ label: "One", value: "1" }],
+        }),
+        RadioSelect({ id: "radio", label: "Pick", options: [{ label: "One", value: "1" }] }),
+        DocumentPreview({
+          documentId: "d1",
+          name: "Contract.pdf",
+          status: "pending_signature",
+          thumbnailUrl: "https://example.com/thumb.png",
+          signingUrl: "https://example.com/sign",
+        }),
+        SignerStatus([{ name: "Alice", completed: true }]),
+      ],
+    });
+
+    expect(renderText(all)).toContain("Document: Contract.pdf");
+    expect(renderMarkdown(all)).toContain("[Open document](https://example.com/sign)");
+    expect(renderHtml(all)).toContain('<option value="" disabled selected>Select one</option>');
   });
 });

@@ -11,6 +11,9 @@ function fakeClient(): AssinafyClient {
         pagination: { currentPage: 1, pageCount: 1, perPage: 50, totalCount: 1 },
       }),
       create: vi.fn().mockResolvedValue({ id: "s2", full_name: "Bob" }),
+      get: vi.fn().mockResolvedValue({ id: "s1", full_name: "Alice" }),
+      update: vi.fn().mockResolvedValue({ id: "s1", full_name: "Alice Updated" }),
+      remove: vi.fn().mockResolvedValue(undefined),
     },
     documents: {
       list: vi.fn().mockResolvedValue({
@@ -18,8 +21,14 @@ function fakeClient(): AssinafyClient {
         pagination: { currentPage: 1, pageCount: 1, perPage: 50, totalCount: 1 },
       }),
       get: vi.fn().mockResolvedValue({ id: "d1" }),
+      remove: vi.fn().mockResolvedValue(undefined),
       statuses: vi.fn().mockResolvedValue([{ code: "uploading", deletable: false }]),
       activities: vi.fn().mockResolvedValue([]),
+      rename: vi.fn().mockResolvedValue({ id: "d1", name: "Renamed" }),
+      search: vi.fn().mockResolvedValue({
+        data: [{ id: "d1" }],
+        pagination: { currentPage: 1, pageCount: 1, perPage: 50, totalCount: 1 },
+      }),
       sendPublicToken: vi.fn().mockResolvedValue({ document: { id: "d1", name: "D", page_count: "1" } }),
       verify: vi.fn().mockResolvedValue({ id: "d1" }),
     },
@@ -70,6 +79,9 @@ function fakeClient(): AssinafyClient {
         pagination: { currentPage: 1, pageCount: 1, perPage: 50, totalCount: 0 },
       }),
       retryDispatch: vi.fn().mockResolvedValue({ id: "wh1", delivered: true }),
+    },
+    accounts: {
+      list: vi.fn().mockResolvedValue([{ id: "acct", name: "Account" }]),
     },
   } as unknown as AssinafyClient;
 }
@@ -158,6 +170,76 @@ describe("createChatTools", () => {
   it("runTool rejects unknown tool names", async () => {
     const tools = createChatTools(fakeClient());
     await expect(runTool(tools, "no_such_tool", {})).rejects.toThrow(/unknown tool/);
+  });
+
+  it("validates untrusted tool arguments before calling the client", async () => {
+    const client = fakeClient();
+    const tools = createChatTools(client);
+
+    await expect(runTool(tools, "create_signer", { email: "not-an-email" })).rejects.toThrow(
+      /full_name.*required/,
+    );
+    await expect(runTool(tools, "list_signers", { perPage: 101 })).rejects.toThrow(/at most 100/);
+    await expect(
+      runTool(tools, "estimate_assignment_cost", { documentId: "document" }),
+    ).resolves.toBeDefined();
+    await expect(
+      runTool(tools, "instantiate_template", {
+        templateId: "template",
+        signers: [{ role_id: "role" }],
+      }),
+    ).rejects.toThrow(/id.*required/);
+    expect(client.signers.create).not.toHaveBeenCalled();
+  });
+
+  it("executes every documented tool with a valid minimal payload", async () => {
+    const tools = createChatTools(fakeClient());
+    const args: Record<string, Record<string, unknown>> = {
+      list_signers: {},
+      create_signer: { full_name: "Alice" },
+      get_signer: { signerId: "s1" },
+      update_signer: { signerId: "s1", full_name: "Alice Updated" },
+      delete_signer: { signerId: "s1" },
+      list_documents: {},
+      get_document: { documentId: "d1" },
+      delete_document: { documentId: "d1" },
+      document_activities: { documentId: "d1" },
+      rename_document: { documentId: "d1", name: "Renamed" },
+      search_documents: {},
+      list_document_statuses: {},
+      create_assignment: { documentId: "d1", method: "virtual", signers: [{ id: "s1" }] },
+      estimate_assignment_cost: { documentId: "d1" },
+      list_templates: {},
+      instantiate_template: { templateId: "t1", signers: [{ role_id: "r1", id: "s1" }] },
+      list_tags: {},
+      create_tag: { name: "Legal" },
+      tag_document: { documentId: "d1", tagIds: ["tag1"] },
+      list_fields: {},
+      create_field: { type: "text", name: "Reference" },
+      get_field: { fieldId: "f1" },
+      update_field: { fieldId: "f1", name: "Reference Updated" },
+      delete_field: { fieldId: "f1" },
+      validate_field: { fieldId: "f1", value: "ABC" },
+      validate_fields: { entries: [{ field_id: "f1", value: "ABC" }] },
+      list_field_types: {},
+      get_webhook_subscription: {},
+      update_webhook_subscription: {
+        events: ["document_ready"],
+        is_active: true,
+        url: "https://example.com/webhook",
+        email: "ops@example.com",
+      },
+      inactivate_webhook_subscription: {},
+      list_webhook_event_types: {},
+      list_webhook_dispatches: {},
+      retry_webhook_dispatch: { dispatchId: "wh1" },
+      send_public_token: { documentId: "d1", email: "signer@example.com" },
+      verify_document: { signatureHash: "0".repeat(64) },
+      list_accounts: {},
+    };
+
+    expect(Object.keys(args).sort()).toEqual(tools.map((tool) => tool.name).sort());
+    for (const tool of tools) await expect(tool.execute(args[tool.name]!)).resolves.toBeDefined();
   });
 });
 
