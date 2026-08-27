@@ -187,6 +187,12 @@ export interface AuthenticatedUser {
   government_id: string | null;
   is_email_verified: boolean;
   has_accepted_terms: boolean;
+  /**
+   * Whether the user has a password set (`false` for social-login-only
+   * accounts). Returned by the API but absent from the published `AuthUser`
+   * schema, so it is typed optional.
+   */
+  is_password_set?: boolean;
   created_at: string;
   to_be_deleted_at: string | null;
 }

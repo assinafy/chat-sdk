@@ -251,7 +251,7 @@ Document-tag operations take tag **IDs**, not tag names.
 | SDK method | HTTP operation | Auth | Request | Unwrapped SDK response |
 | --- | --- | --- | --- | --- |
 | <a id="templates-list"></a>`templates.list(accountId, query?)` | `GET /accounts/{accountId}/templates` | account | [`ListTemplatesQuery`](#template-list-query) | [`Page<Template>`](#template-response) |
-| <a id="templates-get"></a>`templates.get(accountId, templateId)` | `GET /accounts/{accountId}/templates/{templateId}` | account | path/query only | [`Template`](#template-response) |
+| <a id="templates-get"></a>`templates.get(accountId, templateId)` | `GET /accounts/{accountId}/templates/{templateId}` (not in the published document — see [note](./API_COVERAGE.md#operation-outside-the-published-openapi-document)) | account | path/query only | [`Template`](#template-response) |
 | <a id="templates-instantiate"></a>`templates.instantiate(accountId, templateId, input)` | `POST /accounts/{accountId}/templates/{templateId}/documents` | account | [`CreateDocumentFromTemplateInput`](#instantiate-template-request) | [`Document`](#document-response) |
 | <a id="templates-estimate-cost"></a>`templates.estimateCost(accountId, templateId, input)` | `POST /accounts/{accountId}/templates/{templateId}/documents/estimate-cost` | account | [`{ signers }`](#estimate-template-cost-request) | [`CostEstimate`](#cost-estimate-response) |
 
@@ -596,10 +596,17 @@ unwrapped response:
   "government_id": "12345678909",
   "is_email_verified": true,
   "has_accepted_terms": true,
+  "is_password_set": true,
   "created_at": "2026-08-20T14:30:00Z",
   "to_be_deleted_at": null
 }
 ```
+
+`is_password_set` is `false` for accounts created through social login only. The
+API returns it, but the published `AuthUser` schema omits it, so the SDK types it
+optional.
+
+`login()` returns the same object as `LoginResponse.user`.
 
 #### Notification preferences
 
@@ -639,7 +646,9 @@ SDK object and corresponding query string:
 ?search=aline&sort=full_name&page=1&per-page=20
 ```
 
-When supplied, `sort` is encoded as a query parameter.
+When supplied, `sort` is encoded as a query parameter. The published document
+does not declare `sort` for this path; see
+[query parameters beyond the published document](./API_COVERAGE.md#query-parameters-the-sdk-sends-beyond-the-published-document).
 
 #### Create signer request
 
@@ -780,6 +789,10 @@ API may add statuses.
 
 The SDK joins array-valued `status` and `tags` with commas and encodes
 `perPage` as `per-page`. The published sort fields are `name` and `updated_at`.
+`signature.listDocuments` accepts the same object, but the published document
+declares only `page` and `per-page` for the signer-facing path; the remaining
+filters are listed under
+[query parameters beyond the published document](./API_COVERAGE.md#query-parameters-the-sdk-sends-beyond-the-published-document).
 
 #### Document search query
 
@@ -1094,7 +1107,10 @@ Do not require those optional response fields.
 
 The string overload `tags.list(accountId, "legal")` is shorthand for
 `{ search: "legal" }`. When supplied, `sort`, `page`, and `perPage` are encoded
-as query parameters.
+as query parameters. The published document declares only `search` for this
+path; pagination is verified to work against the API, and the other parameters
+are listed under
+[query parameters beyond the published document](./API_COVERAGE.md#query-parameters-the-sdk-sends-beyond-the-published-document).
 
 #### Create tag request
 
@@ -1191,7 +1207,10 @@ Removing one tag from a document:
 ```
 
 The SDK encodes `perPage` as `per-page`, joins array-valued `tags` with commas,
-and sends each supplied filter as a query parameter.
+and sends each supplied filter as a query parameter. The published document
+declares only `search`, `page`, and `per-page` for this path; `status`, `tags`,
+and `sort` are listed under
+[query parameters beyond the published document](./API_COVERAGE.md#query-parameters-the-sdk-sends-beyond-the-published-document).
 
 #### Template response
 

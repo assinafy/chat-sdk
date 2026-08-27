@@ -121,7 +121,7 @@ async function main(): Promise<void> {
     for (let round = 0; round < 8; round++) {
       const response = await createMessage(
         anthropicApiKey,
-        process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-6",
+        process.env.ANTHROPIC_MODEL ?? "claude-sonnet-5",
         defaultSystemPrompt("Assinafy"),
         tools,
         messages,

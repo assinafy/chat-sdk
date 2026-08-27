@@ -9,6 +9,22 @@ export default [
   },
   js.configs.recommended,
   {
+    // Repository scripts are plain ESM run by Node, so `no-undef` needs to know
+    // about the runtime globals they use. TypeScript files turn the rule off
+    // entirely (see below) because the compiler already checks them.
+    files: ["scripts/**/*.mjs", "*.mjs"],
+    languageOptions: {
+      globals: {
+        console: "readonly",
+        fetch: "readonly",
+        Headers: "readonly",
+        process: "readonly",
+        Response: "readonly",
+        URL: "readonly",
+      },
+    },
+  },
+  {
     files: ["**/*.ts"],
     languageOptions: {
       parser: tsparser,

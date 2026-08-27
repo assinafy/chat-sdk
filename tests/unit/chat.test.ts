@@ -86,6 +86,21 @@ describe("Chat", () => {
     await expect(c.whenReady()).resolves.toBeUndefined();
   });
 
+  it("rejects a Chat with no adapters", () => {
+    expect(() => new Chat({ userName: "ready-bot", adapters: {} })).toThrow(
+      "Chat requires at least one adapter",
+    );
+  });
+
+  it("post() sends to a thread without materializing a Thread first", async () => {
+    await chat.post("memory", "thread-9", { text: "direct", fallbackText: "direct" });
+    expect(adapter.outbox).toHaveLength(1);
+    expect(adapter.outbox[0]).toMatchObject({ threadId: "thread-9", text: "direct" });
+    await expect(chat.post("missing", "thread-9", "nope")).rejects.toThrow(
+      'no adapter registered under name "missing"',
+    );
+  });
+
   it("rejects an unknown default adapter before initialization", () => {
     expect(
       () =>

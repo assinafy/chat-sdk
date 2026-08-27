@@ -24,3 +24,30 @@ for (const entry of entries) {
 const { AssinafyClient } = await import(new URL("../dist/client/index.js", import.meta.url));
 const client = new AssinafyClient({ baseUrl: "https://example.com/v1" });
 assert.ok(client.users, "UsersResource is missing from the built client");
+
+// The SDK version reaches the User-Agent two ways: tsup's build-time `define`
+// for the bundle, and a literal fallback in the source for un-bundled use.
+// Both must track package.json, so assert each against it rather than trusting
+// that a release remembered to update them.
+let sentHeaders;
+const versioned = new AssinafyClient({
+  baseUrl: "https://example.com/v1",
+  fetch: async (_url, init) => {
+    sentHeaders = new Headers(init.headers);
+    return new Response(JSON.stringify({ status: 200, message: "", data: null }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  },
+});
+await versioned.documents.statuses();
+assert.equal(
+  sentHeaders.get("user-agent"),
+  `@assinafy/chat-sdk/${pkg.version}`,
+  "built User-Agent does not carry the package.json version",
+);
+
+const httpSource = readFileSync(new URL("../src/client/http.ts", import.meta.url), "utf8");
+const fallback = /__SDK_VERSION__\s*:\s*"([^"]+)"/.exec(httpSource);
+assert.ok(fallback, "could not find the un-bundled SDK version fallback in src/client/http.ts");
+assert.equal(fallback[1], pkg.version, "src/client/http.ts version fallback is stale");

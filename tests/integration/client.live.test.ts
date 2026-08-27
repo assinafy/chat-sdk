@@ -27,19 +27,24 @@ describeLive("Assinafy API — live sandbox", () => {
   // Track resources we create so we can clean up at the end.
   const cleanup: Array<() => Promise<void>> = [];
   // Every test already deletes its own resources inline, so these tasks are the
-  // safety net for resources a *failing* test orphaned — almost all of them 404.
-  // They target independent resources (signers, documents, fields, tags,
-  // accounts, all removed with `force`), so run them concurrently: serially this
-  // was a dozen round trips sharing one hook budget, and a single slow sandbox
-  // request was enough to time the hook out and fail an otherwise green run.
+  // safety net for resources a *failing* test orphaned — almost all of them 404
+  // immediately. The stack unwinds last-in-first-out and one task at a time
+  // because the entries are not independent: a signer attached to an assignment
+  // cannot be deleted until its document is gone, and a document is deletable
+  // only after it leaves `metadata_processing`. Deleting concurrently races
+  // those dependencies and reports cleanup failures that mask the real one.
   afterAll(async () => {
-    const results = await Promise.allSettled(cleanup.reverse().map((task) => task()));
-    const errors = results
-      .filter((result) => result.status === "rejected")
-      .map((result) => result.reason)
-      .filter((error) => !(error instanceof ApiError) || error.status !== 404);
+    const errors: unknown[] = [];
+    for (const task of cleanup.reverse()) {
+      try {
+        await task();
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) continue;
+        errors.push(error);
+      }
+    }
     if (errors.length) throw new AggregateError(errors, "Sandbox cleanup failed");
-  }, 60_000);
+  }, 120_000);
 
   it("documents.statuses() returns the canonical status list", async () => {
     const statuses = await client.documents.statuses();

@@ -4,6 +4,11 @@ This index lists the 89 Assinafy v1 operations, their SDK methods, request and
 response documentation, and authentication mode. Paths include the `/v1`
 prefix; SDK resource methods use a `baseUrl` that already contains it.
 
+Two sections after the tables record where the SDK's HTTP surface goes beyond
+the published document: one endpoint the document omits, and the optional query
+parameters some list methods forward. Everything else the SDK sends is declared
+below.
+
 OpenAPI source:
 [https://api.assinafy.com.br/v1/docs/openapi.json](https://api.assinafy.com.br/v1/docs/openapi.json).
 
@@ -176,9 +181,37 @@ Authentication labels:
 | GET | `/v1/accounts/{accountId}/webhooks` | `client.webhooks.listDispatches` | [Request](API_REFERENCE.md#webhooks-list-dispatches) | [Unwrapped response](API_REFERENCE.md#webhooks-list-dispatches) | Bearer / API key |
 | POST | `/v1/accounts/{accountId}/webhooks/{historyId}/retry` | `client.webhooks.retryDispatch` | [Request](API_REFERENCE.md#webhooks-retry-dispatch) | [Unwrapped response](API_REFERENCE.md#webhooks-retry-dispatch) | Bearer / API key |
 
+## Operation outside the published OpenAPI document
+
+One SDK method reaches an endpoint the OpenAPI document does not list:
+
+- `client.templates.get(accountId, templateId)` → `GET /v1/accounts/{accountId}/templates/{templateId}`, authenticated with a bearer token or API key.
+  It returns the same [`Template`](API_REFERENCE.md#template-response) shape as the list operation plus `default_document_tags` and the full page, field, and role layout.
+  See [`templates.get`](API_REFERENCE.md#templates-get) for its request and response.
+
+The endpoint is live on the production and sandbox hosts and is exercised by the
+repository's integration suite, but because it is absent from the OpenAPI
+document it carries no published compatibility guarantee. Applications that need
+a strictly documented surface can read the same fields from
+[`templates.list`](API_REFERENCE.md#templates-list).
+
+## Query parameters the SDK sends beyond the published document
+
+Several list methods forward optional parameters the OpenAPI document does not
+declare for that path. Each is omitted from the request unless the caller
+supplies it, so the documented behavior is unchanged when they are left unset.
+
+| SDK method | Undeclared parameters | Verified against the sandbox |
+| --- | --- | --- |
+| `client.tags.list` | `sort`, `page`, `per-page` | `page`/`per-page` paginate; `sort` is accepted |
+| `client.signers.list` | `sort` | Accepted; ordering effect not observable |
+| `client.templates.list` | `status`, `tags`, `sort` | Accepted |
+| `client.signature.listDocuments` | `status`, `method`, `search`, `sort`, `tags` | Accepted |
+| `client.fields.validate`, `client.fields.validateMultiple` | `signer-access-code` | Accepted; sent only for signer-facing calls |
+
 ## Related SDK helpers
 
-These helpers do not add HTTP operations:
+These helpers add no HTTP operation of their own:
 
 - `client.documents.iterate` and `client.signers.iterate` page through their corresponding list operations.
 - `client.auth.listApiKeys` adapts the single-key response to an array; `client.auth.revokeApiKeys` aliases `deleteApiKey`.

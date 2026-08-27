@@ -114,10 +114,13 @@ export class DocumentsResource {
     if (input.tags) {
       for (const tag of input.tags) form.append("tags[]", tag);
     }
-    return this.http.post<Document>(paths.collection(accountId), undefined, {
+    // `request` rather than `post`: the body is multipart, so the runtime must
+    // generate the boundary and set `content-type` itself.
+    const response = await this.http.request<Document>(paths.collection(accountId), {
       method: "POST",
       body: form,
     });
+    return response.data;
   }
 
   /** Fetch a single document by id. */

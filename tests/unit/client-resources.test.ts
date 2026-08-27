@@ -42,6 +42,36 @@ function makeClient(responses: unknown[] = []): { client: AssinafyClient; reques
 }
 
 describe("AssinafyClient resource paths", () => {
+  it("forwards every transport option to the HttpClient and keeps credentials out of it", async () => {
+    const rateLimits: unknown[] = [];
+    const fetchImpl = vi.fn().mockImplementation(async () =>
+      new Response(JSON.stringify({ status: 200, message: "", data: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json", "x-rate-limit-limit": "42" },
+      }),
+    );
+    const client = new AssinafyClient({
+      apiKey: "test-key",
+      accountId: "acct",
+      baseUrl: "https://sandbox.test/v1",
+      fetch: fetchImpl as unknown as typeof fetch,
+      userAgent: "custom-agent/1.0",
+      maxRetries: 0,
+      retryBaseDelayMs: 1,
+      onRateLimit: (limit) => rateLimits.push(limit),
+    });
+
+    await client.documents.statuses();
+
+    const [, init] = fetchImpl.mock.calls[0]!;
+    expect(new Headers(init.headers).get("user-agent")).toBe("custom-agent/1.0");
+    expect(rateLimits).toEqual([{ limit: 42, remaining: 0, resetSeconds: 0 }]);
+    expect(client.accountId).toBe("acct");
+    // Credentials are consumed into the auth strategy, never left as loose
+    // transport options.
+    expect(client.http.auth).toEqual({ kind: "apiKey", apiKey: "test-key" });
+  });
+
   it("allows unauthenticated clients for login and public flows", async () => {
     const requests: RecordedRequest[] = [];
     const fetchImpl = vi.fn().mockImplementation(async (url: string, init: RequestInit = {}) => {
@@ -653,5 +683,49 @@ describe("AssinafyClient resource paths", () => {
     const ids: string[] = [];
     for await (const signer of client.signers.iterate("acct", { perPage: 1 })) ids.push(signer.id);
     expect(ids).toEqual(["s1"]);
+  });
+
+  it("iterates documents across pages and stops at the last one", async () => {
+    const pages = [[{ id: "d1" }], [{ id: "d2" }], [{ id: "d3" }]];
+    const requested: string[] = [];
+    const fetchImpl = vi.fn().mockImplementation(async (url: string) => {
+      const page = Number(new URL(url).searchParams.get("page") ?? 1);
+      requested.push(`page=${page}`);
+      return new Response(JSON.stringify({ status: 200, message: "", data: pages[page - 1] ?? [] }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "x-pagination-current-page": String(page),
+          "x-pagination-page-count": String(pages.length),
+          "x-pagination-per-page": "1",
+          "x-pagination-total-count": String(pages.length),
+        },
+      });
+    });
+    const client = new AssinafyClient({
+      apiKey: "test-key",
+      baseUrl: "https://sandbox.test/v1",
+      fetch: fetchImpl as unknown as typeof fetch,
+      maxRetries: 0,
+    });
+
+    const ids: string[] = [];
+    for await (const document of client.documents.iterate("acct", { perPage: 1 })) {
+      ids.push(document.id);
+    }
+
+    expect(ids).toEqual(["d1", "d2", "d3"]);
+    // Stops after the final page rather than requesting a fourth empty one.
+    expect(requested).toEqual(["page=1", "page=2", "page=3"]);
+  });
+
+  it("resumes iteration from an explicit starting page", async () => {
+    const { client, requests } = makeClient([[{ id: "d9" }]]);
+    const ids: string[] = [];
+    for await (const document of client.documents.iterate("acct", { page: 4, perPage: 1 })) {
+      ids.push(document.id);
+    }
+    expect(ids).toEqual(["d9"]);
+    expect(new URL(requests[0]!.url).searchParams.get("page")).toBe("4");
   });
 });

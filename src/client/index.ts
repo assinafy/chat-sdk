@@ -107,16 +107,16 @@ export class AssinafyClient {
   readonly users: UsersResource;
 
   constructor(options: AssinafyClientOptions = {}) {
+    // Credentials become an `auth` strategy; everything else on the options
+    // object is a transport setting and is forwarded verbatim, so adding an
+    // `HttpClientOptions` field does not require editing this constructor.
+    const { apiKey: _apiKey, accessToken: _accessToken, accountId, baseUrl, ...transport } = options;
     this.http = new HttpClient({
-      baseUrl: options.baseUrl ?? DEFAULT_BASE_URL,
+      ...transport,
+      baseUrl: baseUrl ?? DEFAULT_BASE_URL,
       auth: resolveAuth(options),
-      fetch: options.fetch,
-      maxRetries: options.maxRetries,
-      retryBaseDelayMs: options.retryBaseDelayMs,
-      userAgent: options.userAgent,
-      onRateLimit: options.onRateLimit,
     });
-    this.accountId = options.accountId;
+    this.accountId = accountId;
     this.accounts = new AccountsResource(this.http);
     this.auth = new AuthResource(this.http);
     this.signers = new SignersResource(this.http);
