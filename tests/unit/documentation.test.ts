@@ -20,7 +20,7 @@ describe("published documentation", () => {
     const reference = await readFile(new URL("../../docs/API_REFERENCE.md", import.meta.url), "utf8");
     const coverage = await readFile(new URL("../../docs/API_COVERAGE.md", import.meta.url), "utf8");
 
-    const sourceMethods = (
+    const sourceMethods = [...new Set((
       await Promise.all(
         RESOURCE_NAMES.map(async (resource) => {
           const source = await readFile(
@@ -33,7 +33,7 @@ describe("published documentation", () => {
             .map((method) => `${resource}.${method}`);
         }),
       )
-    ).flat();
+    ).flat())];
     const documentedMethods = [...reference.matchAll(/<a id="[^"]+"><\/a>`([a-z]+\.[A-Za-z0-9]+)\(/g)]
       .map((match) => match[1]!);
     expect(documentedMethods.sort()).toEqual(sourceMethods.sort());

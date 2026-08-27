@@ -10,20 +10,35 @@ export interface TestEnv {
   accountId: string;
   primaryEmail: string;
   secondaryEmail: string;
+  notificationsEnabled: boolean;
 }
+
+const SANDBOX_BASE_URL = "https://sandbox.assinafy.com.br/v1";
 
 /** Returns env vars if all required ones are present, otherwise `undefined`. */
 export function loadEnv(): TestEnv | undefined {
-  const baseUrl = process.env.ASSINAFY_BASE_URL ?? "https://sandbox.assinafy.com.br/v1";
+  const baseUrl = (process.env.ASSINAFY_BASE_URL ?? SANDBOX_BASE_URL).replace(/\/$/, "");
+  if (baseUrl !== SANDBOX_BASE_URL) {
+    throw new Error(`Live tests require ASSINAFY_BASE_URL=${SANDBOX_BASE_URL}`);
+  }
   const apiKey = process.env.ASSINAFY_API_KEY;
   const accountId = process.env.ASSINAFY_ACCOUNT_ID;
   if (!apiKey || !accountId) return undefined;
+  const notificationsEnabled = process.env.ASSINAFY_TEST_NOTIFICATIONS === "1";
+  const primaryEmail = process.env.ASSINAFY_TEST_EMAIL_PRIMARY;
+  const secondaryEmail = process.env.ASSINAFY_TEST_EMAIL_SECONDARY;
+  if (notificationsEnabled && (!primaryEmail || !secondaryEmail)) {
+    throw new Error(
+      "ASSINAFY_TEST_EMAIL_PRIMARY and ASSINAFY_TEST_EMAIL_SECONDARY are required for notification tests",
+    );
+  }
   return {
     baseUrl,
     apiKey,
     accountId,
-    primaryEmail: process.env.ASSINAFY_TEST_EMAIL_PRIMARY ?? "bill@febacapital.com",
-    secondaryEmail: process.env.ASSINAFY_TEST_EMAIL_SECONDARY ?? "billm@billm.org",
+    primaryEmail: primaryEmail ?? "sdk-primary@example.test",
+    secondaryEmail: secondaryEmail ?? "sdk-secondary@example.test",
+    notificationsEnabled,
   };
 }
 

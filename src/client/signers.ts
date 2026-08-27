@@ -10,6 +10,7 @@
  */
 
 import { withQuery, type HttpClient } from "./http.js";
+import { pageQuery } from "./internal.js";
 import type {
   CreateSignerInput,
   ListSignersQuery,
@@ -41,8 +42,7 @@ export class SignersResource {
       withQuery(paths.collection(accountId), {
         search: query.search,
         sort: query.sort,
-        page: query.page,
-        "per-page": query.perPage,
+        ...pageQuery(query.page, query.perPage),
       }),
     );
   }
@@ -83,8 +83,10 @@ export class SignersResource {
    * Public flow: confirm/update signer data using a `signer-access-code`.
    * Used by the embeddable signer UI before the signer signs.
    *
-   * The documented body fields are `full_name`, `email`, and `government_id`.
-   * To accept the terms of use, call {@link SignatureResource.acceptTerms}.
+   * Digital-certificate signers must confirm data and accept terms before
+   * fetching signing context. Passing `has_accepted_terms: true` here satisfies
+   * both requirements; terms may instead be accepted separately through
+   * `SignatureResource.acceptTerms`.
    */
   confirmDataForDocument(
     documentId: string,

@@ -89,14 +89,18 @@ export class Chat implements ChatHandle {
       throw new Error("Chat requires at least one adapter");
     }
     this.userName = options.userName;
-    this.adapters = options.adapters;
+    this.adapters = Object.freeze({ ...options.adapters });
     this.state = options.state ?? new MemoryStateAdapter();
     this.client = options.client;
     this.defaultAdapter = options.defaultAdapter ?? adapterNames[0]!;
+    if (!Object.hasOwn(this.adapters, this.defaultAdapter)) {
+      throw new Error(`Chat: no adapter registered under name "${this.defaultAdapter}"`);
+    }
     // Kick off adapter initialization. The promise is awaited by every dispatch
     // entry point (and exposed via `whenReady()`) so init errors surface rather
     // than being silently swallowed.
     this.ready = this.initializeAdapters();
+    void this.ready.catch(() => undefined);
   }
 
   /**
@@ -164,18 +168,25 @@ export class Chat implements ChatHandle {
 
   /** Open a new thread by DMing `recipient`. Useful for proactive outreach. */
   async openThread(recipient: string, adapterName: string = this.defaultAdapter): Promise<Thread> {
+    await this.ready;
     const adapter = this.requireAdapter(adapterName);
     const threadId = await adapter.openDM(recipient);
-    return new Thread({ id: threadId, adapter, state: this.state });
+    return new Thread({ id: threadId, adapter, state: this.state, ready: this.ready });
   }
 
   /** Construct a thread reference for an existing thread id. */
   thread(adapterName: string, threadId: string): Thread {
-    return new Thread({ id: threadId, adapter: this.requireAdapter(adapterName), state: this.state });
+    return new Thread({
+      id: threadId,
+      adapter: this.requireAdapter(adapterName),
+      state: this.state,
+      ready: this.ready,
+    });
   }
 
   /** Convenience: post directly to a thread without retrieving a Thread first. */
   async post(adapterName: string, threadId: string, body: PostInput): Promise<void> {
+    await this.ready;
     await this.thread(adapterName, threadId).post(body);
   }
 
@@ -195,6 +206,7 @@ export class Chat implements ChatHandle {
       adapter,
       state: this.state,
       originatingMessage: message,
+      ready: this.ready,
     });
 
     // Priority order: slash command > regex onNewMessage > subscribed follow-up
@@ -231,7 +243,7 @@ export class Chat implements ChatHandle {
   /** Adapter entry point: dispatch a normalized inbound action. */
   async processAction(adapter: ChatAdapter, action: IncomingAction): Promise<void> {
     await this.ready;
-    const thread = new Thread({ id: action.threadId, adapter, state: this.state });
+    const thread = new Thread({ id: action.threadId, adapter, state: this.state, ready: this.ready });
     for (const handler of this.actionHandlers) await handler(thread, action);
   }
 
@@ -241,6 +253,7 @@ export class Chat implements ChatHandle {
    * running. Rejects with the first error afterwards, if any occurred.
    */
   async disconnect(): Promise<void> {
+    await this.ready.catch(() => undefined);
     const results = await Promise.allSettled(
       Object.values(this.adapters).map((adapter) =>
         typeof adapter.disconnect === "function" ? adapter.disconnect() : Promise.resolve(),
@@ -261,9 +274,10 @@ export class Chat implements ChatHandle {
   }
 
   private requireAdapter(name: string): ChatAdapter {
-    const adapter = this.adapters[name];
-    if (!adapter) throw new Error(`Chat: no adapter registered under name "${name}"`);
-    return adapter;
+    if (!Object.hasOwn(this.adapters, name)) {
+      throw new Error(`Chat: no adapter registered under name "${name}"`);
+    }
+    return this.adapters[name]!;
   }
 }
 

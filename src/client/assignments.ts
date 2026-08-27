@@ -6,6 +6,8 @@
  */
 
 import { withQuery, type HttpClient } from "./http.js";
+import { ConfigurationError } from "./errors.js";
+import { pageQuery } from "./internal.js";
 import type {
   Assignment,
   CostEstimate,
@@ -40,29 +42,31 @@ export class AssignmentsResource {
   constructor(private readonly http: HttpClient) {}
 
   /**
-   * List the assignments belonging to the authenticated user's **current
-   * account**.
-   *
-   * Production OpenAPI declares bearer and API-key authentication. The
-   * 2026-08 sandbox still returns `400` for API keys because it lacks a current
-   * account context; bearer tokens work around that older deployment behavior.
+   * List the assignments belonging to the authenticated user's current
+   * account.
    */
   list(query: ListAssignmentsQuery = {}): Promise<Page<Assignment>> {
     return this.http.getPage<Assignment>(
-      withQuery(paths.list(), { page: query.page, "per-page": query.perPage }),
+      withQuery(paths.list(), pageQuery(query.page, query.perPage)),
     );
   }
 
   /**
    * Create an assignment, attaching one or more signers to a document.
    *
-   * Prefer `signers: [{ id }]` so verification and notification methods can be
-   * configured per signer. The `signerIds` / `signer_ids` convenience aliases
-   * are expanded into `signers: [{ id }]` (the API's documented field) before
-   * sending.
+   * `signers: [{ id }]` is the canonical request field and supports per-signer
+   * verification, notification, and signing-order settings. The `signerIds`
+   * and `signer_ids` convenience aliases are normalized to that field.
    */
   create(documentId: string, input: CreateAssignmentInput): Promise<Assignment> {
-    return this.http.post<Assignment>(paths.collection(documentId), normalizeAssignmentInput(input));
+    const body = normalizeAssignmentInput(input);
+    if (!Array.isArray(body.signers) || body.signers.length === 0) {
+      throw new ConfigurationError("AssignmentsResource.create requires at least one signer");
+    }
+    if (input.method === "collect" && (!input.entries || input.entries.length === 0)) {
+      throw new ConfigurationError("Collect assignments require at least one field entry");
+    }
+    return this.http.post<Assignment>(paths.collection(documentId), body);
   }
 
   /** Estimate the cost of an assignment without creating it. */
@@ -99,7 +103,11 @@ export class AssignmentsResource {
     });
   }
 
-  /** Submit signer-filled field values using a signer access code. */
+  /**
+   * Submit signer-filled values for a collect assignment. Virtual assignments
+   * require confirmed signer data first; digital-certificate assignments use
+   * the certificate signing flow instead of this endpoint.
+   */
   async sign(
     documentId: string,
     assignmentId: string,
@@ -132,21 +140,23 @@ export class AssignmentsResource {
 }
 
 /**
- * Normalize the create/estimate body to the API's documented shape. The API
- * only recognizes `signers: [{ id, … }]`; a bare `signer_ids` / `signerIds`
- * array is silently ignored (the request then fails with "at least one signer
- * is required"). We therefore expand any id array into `signers` entries and
- * merge them with an explicit `signers` list.
+ * Normalize convenience aliases to the canonical assignment request shape,
+ * merging signer ids with explicit signer settings and mapping `expiration`
+ * to `expires_at`.
  */
 function normalizeAssignmentInput(
   input: CreateAssignmentInput | EstimateAssignmentCostInput,
 ): Record<string, unknown> {
   const { signerIds, signer_ids, signers, ...rawRest } = input;
   const { expiration, ...rest } = rawRest as typeof rawRest & { expiration?: string };
-  const ids = signer_ids ?? signerIds ?? [];
+  const ids = [...(signer_ids ?? []), ...(signerIds ?? [])];
   const explicit = signers ?? [];
   const seen = new Set(explicit.map((s) => s.id).filter(Boolean));
-  const fromIds = ids.filter((id) => !seen.has(id)).map((id) => ({ id }));
+  const fromIds = ids.flatMap((id) => {
+    if (seen.has(id)) return [];
+    seen.add(id);
+    return [{ id }];
+  });
   const merged = [...explicit, ...fromIds];
   const expiresAt = "expires_at" in rest ? rest.expires_at : undefined;
   return {

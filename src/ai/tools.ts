@@ -81,6 +81,11 @@ export function createChatTools(
     if (!value) throw new Error("accountId is required (no default configured)");
     return value;
   };
+  const entityIdSchema = (id: string) => ({
+    type: "object",
+    properties: { accountId: accountIdSchema, [id]: { type: "string" } },
+    required: accountIdRequired ? ["accountId", id] : [id],
+  });
 
   const tools: ChatTool[] = [
     schemaTool({
@@ -91,8 +96,7 @@ export function createChatTools(
         properties: {
           accountId: accountIdSchema,
           search: { type: "string", description: "Substring filter for full name or email." },
-          page: { type: "integer", minimum: 1 },
-          perPage: { type: "integer", minimum: 1, maximum: 100 },
+          ...PAGINATION_SCHEMA,
         },
         required: accountIdRequired ? ["accountId"] : [],
       },
@@ -128,14 +132,7 @@ export function createChatTools(
     schemaTool({
       name: "get_signer",
       description: "Fetch a signer by id.",
-      schema: {
-        type: "object",
-        properties: {
-          accountId: accountIdSchema,
-          signerId: { type: "string" },
-        },
-        required: accountIdRequired ? ["accountId", "signerId"] : ["signerId"],
-      },
+      schema: entityIdSchema("signerId"),
       execute: async (args: { accountId?: string; signerId: string }) =>
         client.signers.get(accountIdOrDefault(args.accountId), args.signerId),
     }),
@@ -167,14 +164,7 @@ export function createChatTools(
     schemaTool({
       name: "delete_signer",
       description: "Delete a signer by id.",
-      schema: {
-        type: "object",
-        properties: {
-          accountId: accountIdSchema,
-          signerId: { type: "string" },
-        },
-        required: accountIdRequired ? ["accountId", "signerId"] : ["signerId"],
-      },
+      schema: entityIdSchema("signerId"),
       execute: async (args: { accountId?: string; signerId: string }) => {
         await client.signers.remove(accountIdOrDefault(args.accountId), args.signerId);
         return { ok: true };
@@ -202,8 +192,7 @@ export function createChatTools(
             anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }],
           },
           sort: { type: "string", enum: ["name", "updated_at"] },
-          page: { type: "integer", minimum: 1 },
-          perPage: { type: "integer", minimum: 1, maximum: 100 },
+          ...PAGINATION_SCHEMA,
         },
         required: accountIdRequired ? ["accountId"] : [],
       },
@@ -283,8 +272,7 @@ export function createChatTools(
               { type: "array", items: { type: "string", enum: DOCUMENT_STATUS_CODES } },
             ],
           },
-          page: { type: "integer", minimum: 1 },
-          perPage: { type: "integer", minimum: 1, maximum: 100 },
+          ...PAGINATION_SCHEMA,
         },
         required: accountIdRequired ? ["accountId"] : [],
       },
@@ -357,7 +345,7 @@ export function createChatTools(
           { required: ["signerIds"] },
         ],
       },
-      execute: async (args: CreateAssignmentInput & { documentId: string; method: AssignmentMethod }) =>
+      execute: async (args: CreateAssignmentInput & { documentId: string }) =>
         client.assignments.create(args.documentId, {
           method: args.method,
           signer_ids: args.signer_ids,
@@ -367,7 +355,7 @@ export function createChatTools(
           message: args.message,
           expires_at: args.expires_at,
           copy_receivers: args.copy_receivers,
-        }),
+        } as CreateAssignmentInput),
     }),
 
     schemaTool({
@@ -411,8 +399,7 @@ export function createChatTools(
         properties: {
           accountId: accountIdSchema,
           search: { type: "string" },
-          page: { type: "integer" },
-          perPage: { type: "integer" },
+          ...PAGINATION_SCHEMA,
         },
         required: accountIdRequired ? ["accountId"] : [],
       },
@@ -513,7 +500,7 @@ export function createChatTools(
           tags: {
             type: "array",
             items: { type: "string" },
-            description: "Legacy alias accepted by older sandbox deployments.",
+            description: "Alternate tag input alias.",
           },
           tagIds: {
             type: "array",
@@ -573,14 +560,7 @@ export function createChatTools(
     schemaTool({
       name: "get_field",
       description: "Fetch one field definition by id.",
-      schema: {
-        type: "object",
-        properties: {
-          accountId: accountIdSchema,
-          fieldId: { type: "string" },
-        },
-        required: accountIdRequired ? ["accountId", "fieldId"] : ["fieldId"],
-      },
+      schema: entityIdSchema("fieldId"),
       execute: async (args: { accountId?: string; fieldId: string }) =>
         client.fields.get(accountIdOrDefault(args.accountId), args.fieldId),
     }),
@@ -610,14 +590,7 @@ export function createChatTools(
     schemaTool({
       name: "delete_field",
       description: "Delete a field definition. The API rejects fields already used by documents.",
-      schema: {
-        type: "object",
-        properties: {
-          accountId: accountIdSchema,
-          fieldId: { type: "string" },
-        },
-        required: accountIdRequired ? ["accountId", "fieldId"] : ["fieldId"],
-      },
+      schema: entityIdSchema("fieldId"),
       execute: async (args: { accountId?: string; fieldId: string }) => {
         await client.fields.remove(accountIdOrDefault(args.accountId), args.fieldId);
         return { ok: true };
@@ -742,8 +715,7 @@ export function createChatTools(
           delivered: { type: "boolean" },
           from: { type: "integer" },
           to: { type: "integer" },
-          page: { type: "integer", minimum: 1 },
-          perPage: { type: "integer", minimum: 1, maximum: 100 },
+          ...PAGINATION_SCHEMA,
         },
         required: accountIdRequired ? ["accountId"] : [],
       },
@@ -854,34 +826,42 @@ const DOCUMENT_STATUS_CODES: DocumentStatusCode[] = [
   "failed",
 ];
 
+const PAGINATION_SCHEMA = {
+  page: { type: "integer", minimum: 1 },
+  perPage: { type: "integer", minimum: 1, maximum: 100 },
+} as const;
+
+const SIGNER_METHOD_PROPERTIES = {
+  verification_method: { type: "string", enum: ["Email", "Whatsapp", "DigitalCertificate"] },
+  notification_methods: { type: "array", items: { type: "string", enum: ["Email", "Whatsapp"] } },
+} as const;
+
+const ASSIGNMENT_SIGNER_PROPERTIES = {
+  id: { type: "string", description: "Existing signer id." },
+  step: { type: "integer", minimum: 1 },
+  ...SIGNER_METHOD_PROPERTIES,
+} as const;
+
 const TEMPLATE_SIGNER_SCHEMA = {
   type: "object",
   properties: {
     role_id: { type: "string" },
-    id: { type: "string", description: "Existing signer id." },
-    step: { type: "integer", minimum: 1 },
-    verification_method: { type: "string", enum: ["Email", "Whatsapp", "DigitalCertificate"] },
-    notification_methods: { type: "array", items: { type: "string", enum: ["Email", "Whatsapp"] } },
+    ...ASSIGNMENT_SIGNER_PROPERTIES,
   },
   required: ["role_id", "id"],
 } as const;
 
 const ASSIGNMENT_SIGNER_SCHEMA = {
   type: "object",
-  properties: {
-    id: { type: "string", description: "Existing signer id." },
-    step: { type: "integer", minimum: 1 },
-    verification_method: { type: "string", enum: ["Email", "Whatsapp", "DigitalCertificate"] },
-    notification_methods: { type: "array", items: { type: "string", enum: ["Email", "Whatsapp"] } },
-  },
+  properties: ASSIGNMENT_SIGNER_PROPERTIES,
   required: ["id"],
 } as const;
 
 const ESTIMATE_ASSIGNMENT_SIGNER_SCHEMA = {
   type: "object",
   properties: {
-    verification_method: { type: "string", enum: ["Email", "Whatsapp", "DigitalCertificate"] },
-    notification_methods: { type: "array", items: { type: "string", enum: ["Email", "Whatsapp"] } },
+    id: ASSIGNMENT_SIGNER_PROPERTIES.id,
+    ...SIGNER_METHOD_PROPERTIES,
   },
 } as const;
 
@@ -924,13 +904,14 @@ function schemaTool<TArgs, TResult>(input: {
   schema: Record<string, unknown>;
   execute: (args: TArgs) => Promise<TResult>;
 }): ChatTool<TArgs, TResult> {
+  const schema = structuredClone(input.schema);
   return {
     name: input.name,
     description: input.description,
-    input_schema: input.schema,
-    parameters: input.schema,
+    input_schema: schema,
+    parameters: schema,
     execute: async (args) => {
-      assertSchema(input.schema, args, input.name);
+      assertSchema(schema, args, input.name);
       return input.execute(args);
     },
   };

@@ -52,7 +52,7 @@ describe("capitalized card builders", () => {
     expect(out.map((c) => (c as { type: string }).type)).toEqual(["text", "text"]);
   });
 
-  it("lowercase aliases still work (backwards compatibility)", async () => {
+  it("lowercase aliases remain available", async () => {
     const { card, text } = await import("../../src/cards/index.js");
     const c = card({ children: [text("hi")] });
     expect(c.type).toBe("card");
@@ -114,16 +114,37 @@ describe("renderers", () => {
       ],
     });
     const out = renderHtml(dangerous);
+    const markdown = renderMarkdown(dangerous);
     expect(out).not.toContain("javascript:");
     expect(out).not.toContain("data:text/html");
+    expect(markdown).not.toContain("javascript:");
+    expect(markdown).not.toContain("data:text/html");
     expect(out).toContain('href="#"');
     // Legitimate https URLs are preserved.
     expect(out).toContain('href="https://ok.example/sign"');
   });
 
+  it("does not let a safe-looking URL inject another Markdown link", () => {
+    const markdown = renderMarkdown(
+      Card({
+        children: [
+          LinkButton({
+            label: "Open",
+            url: "https://safe.example/) [Click](javascript:alert(1",
+          }),
+        ],
+      }),
+    );
+
+    expect(markdown).not.toContain("](javascript:");
+    expect(markdown).toContain("https://safe.example/%29%20%5BClick%5D%28javascript:alert%281");
+  });
+
   it("keeps safe http/https/mailto URLs intact", () => {
-    const safe = Card({ children: [Actions([LinkButton({ label: "mail", url: "mailto:a@x.com" })])] });
-    expect(renderHtml(safe)).toContain('href="mailto:a@x.com"');
+    const safe = Card({
+      children: [Actions([LinkButton({ label: "mail", url: "mailto:a@example.test" })])],
+    });
+    expect(renderHtml(safe)).toContain('href="mailto:a@example.test"');
   });
 
   it("renders tables in markdown", () => {
@@ -181,5 +202,23 @@ describe("renderers", () => {
     expect(renderText(all)).toContain("Document: Contract.pdf");
     expect(renderMarkdown(all)).toContain("[Open document](https://example.com/sign)");
     expect(renderHtml(all)).toContain('<option value="" disabled selected>Select one</option>');
+    expect(renderHtml(all)).toContain('<button type="button" class="btn btn-primary"');
+  });
+
+  it("gives unlabeled controls accessible names", () => {
+    const html = renderHtml(
+      Card({
+        children: [
+          Select({
+            id: "choice",
+            placeholder: "Choose a signer",
+            options: [{ label: "One", value: "1" }],
+          }),
+          RadioSelect({ id: "radio", options: [{ label: "One", value: "1" }] }),
+        ],
+      }),
+    );
+    expect(html).toContain('aria-label="Choose a signer"');
+    expect(html).toContain('<fieldset aria-label="Options">');
   });
 });

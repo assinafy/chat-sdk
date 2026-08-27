@@ -2,8 +2,7 @@
  * Ergonomic builders for {@link CardElement}s.
  *
  * The capitalized helpers (`Card`, `Text`, `Divider`, `LinkButton`, …) are
- * the canonical API. Lowercase aliases (`card`, `text`, …) are kept for
- * backwards compatibility and brevity in tests.
+ * the canonical API. Lowercase aliases (`card`, `text`, …) remain available.
  *
  * ```ts
  * import { Card, Heading, Text, Divider, LinkButton, Button, Actions } from "@assinafy/chat-sdk/cards";
@@ -12,7 +11,7 @@
  *   title: "Document sent",
  *   children: [
  *     Heading(2, "Contract.pdf"),
- *     Text("Sent to bill@febacapital.com for signature."),
+ *     Text("Sent to signer@example.com for signature."),
  *     Divider(),
  *     Actions([
  *       LinkButton({ label: "Open", url: doc.signing_url! }),
@@ -120,7 +119,7 @@ export function Children(...items: Array<CardElement | null | undefined | false>
 }
 
 // ---------------------------------------------------------------------------
-// Lowercase aliases (kept for backwards compatibility + brevity in tests).
+// Lowercase aliases.
 // ---------------------------------------------------------------------------
 
 export const card = Card;

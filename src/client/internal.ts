@@ -3,6 +3,8 @@
  * API — re-export from {@link ./index.js} only what we want to expose.
  */
 
+import { ConfigurationError } from "./errors.js";
+
 /**
  * Join an array of string values with `,` for query-parameter use, or pass a
  * string through unchanged. The Assinafy API accepts comma-separated values
@@ -23,4 +25,26 @@ export function toBlobPart(body: ArrayBuffer | Uint8Array): BlobPart {
   const copy = new Uint8Array(body.byteLength);
   copy.set(body);
   return copy;
+}
+
+/** Build an upload Blob while honoring an explicit MIME-type override. */
+export function toUploadBlob(
+  body: Blob | ArrayBuffer | Uint8Array,
+  contentType: string | undefined,
+  defaultType: string,
+): Blob {
+  const type = contentType ?? (body instanceof Blob && body.type ? body.type : defaultType);
+  if (body instanceof Blob) return body.type === type ? body : body.slice(0, body.size, type);
+  return new Blob([toBlobPart(body)], { type });
+}
+
+/** Validate and encode the API's shared pagination parameters. */
+export function pageQuery(page?: number, perPage?: number): Record<string, number | undefined> {
+  if (page !== undefined && (!Number.isInteger(page) || page < 1)) {
+    throw new ConfigurationError("page must be a positive integer");
+  }
+  if (perPage !== undefined && (!Number.isInteger(perPage) || perPage < 1 || perPage > 100)) {
+    throw new ConfigurationError("perPage must be an integer between 1 and 100");
+  }
+  return { page, "per-page": perPage };
 }

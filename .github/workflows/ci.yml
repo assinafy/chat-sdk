@@ -6,12 +6,18 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      run_notification_tests:
+        description: Run tests that may send sandbox notifications
+        required: false
+        type: boolean
+        default: false
 
-# Cancel in-progress runs on the same ref when a new commit lands so we don't
-# burn minutes on stale work.
+# Cancel stale pull-request validation, but let main-branch sandbox runs finish
+# so their cleanup hooks are not interrupted.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Default to read-only permissions. Individual jobs widen this only if needed.
 permissions:
@@ -31,7 +37,7 @@ jobs:
       - name: Use Node.js 24
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "24"
+          node-version-file: .nvmrc
           cache: npm
 
       - name: Install dependencies
@@ -63,7 +69,7 @@ jobs:
       - name: Use Node.js 24
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "24"
+          node-version-file: .nvmrc
           cache: npm
 
       - name: Install dependencies
@@ -73,19 +79,29 @@ jobs:
         env:
           ASSINAFY_API_KEY: ${{ secrets.ASSINAFY_API_KEY }}
           ASSINAFY_ACCOUNT_ID: ${{ secrets.ASSINAFY_ACCOUNT_ID }}
+          ASSINAFY_TEST_EMAIL_PRIMARY: ${{ vars.ASSINAFY_TEST_EMAIL_PRIMARY }}
+          ASSINAFY_TEST_EMAIL_SECONDARY: ${{ vars.ASSINAFY_TEST_EMAIL_SECONDARY }}
+          ASSINAFY_TEST_NOTIFICATIONS: ${{ github.event_name == 'workflow_dispatch' && inputs.run_notification_tests && '1' || '0' }}
         run: |
           if [ -z "$ASSINAFY_API_KEY" ] || [ -z "$ASSINAFY_ACCOUNT_ID" ]; then
             echo "::error::ASSINAFY_API_KEY and ASSINAFY_ACCOUNT_ID are required for integration tests."
             exit 1
           fi
+          if [ "$ASSINAFY_TEST_NOTIFICATIONS" = "1" ]; then
+            if [ -z "$ASSINAFY_TEST_EMAIL_PRIMARY" ] || [ -z "$ASSINAFY_TEST_EMAIL_SECONDARY" ]; then
+              echo "::error::ASSINAFY_TEST_EMAIL_PRIMARY and ASSINAFY_TEST_EMAIL_SECONDARY are required for notification tests."
+              exit 1
+            fi
+          fi
 
       - name: Run integration tests
         env:
-          ASSINAFY_BASE_URL: ${{ vars.ASSINAFY_BASE_URL || 'https://sandbox.assinafy.com.br/v1' }}
+          ASSINAFY_BASE_URL: https://sandbox.assinafy.com.br/v1
           ASSINAFY_API_KEY: ${{ secrets.ASSINAFY_API_KEY }}
           ASSINAFY_ACCOUNT_ID: ${{ secrets.ASSINAFY_ACCOUNT_ID }}
-          ASSINAFY_TEST_EMAIL_PRIMARY: ${{ vars.ASSINAFY_TEST_EMAIL_PRIMARY || 'bill@febacapital.com' }}
-          ASSINAFY_TEST_EMAIL_SECONDARY: ${{ vars.ASSINAFY_TEST_EMAIL_SECONDARY || 'billm@billm.org' }}
+          ASSINAFY_TEST_EMAIL_PRIMARY: ${{ vars.ASSINAFY_TEST_EMAIL_PRIMARY }}
+          ASSINAFY_TEST_EMAIL_SECONDARY: ${{ vars.ASSINAFY_TEST_EMAIL_SECONDARY }}
+          ASSINAFY_TEST_NOTIFICATIONS: ${{ github.event_name == 'workflow_dispatch' && inputs.run_notification_tests && '1' || '0' }}
         run: npm run test:integration
 
   actionlint:

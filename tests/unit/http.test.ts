@@ -24,7 +24,7 @@ describe("HttpClient", () => {
   });
 
   it("unwraps successful envelopes that omit data", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(
+    const fetchImpl = vi.fn().mockImplementation(async () =>
       new Response(JSON.stringify({ status: 200, message: "sent" }), {
         status: 200,
         headers: { "content-type": "application/json" },
@@ -37,6 +37,11 @@ describe("HttpClient", () => {
     });
 
     await expect(http.put<void>("/send-token", {})).resolves.toBeUndefined();
+    await expect(http.request<void>("/send-token", { method: "PUT" })).resolves.toMatchObject({
+      data: undefined,
+      message: "sent",
+      status: 200,
+    });
   });
 
   it("attaches bearer token", async () => {
@@ -117,6 +122,57 @@ describe("HttpClient", () => {
     expect(calls).toBe(2);
   });
 
+  it("honors Retry-After values longer than the fallback backoff cap", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi
+        .fn()
+        .mockResolvedValueOnce(mkResponse("busy", { status: 429, headers: { "retry-after": "60" } }))
+        .mockResolvedValueOnce(mkResponse({ status: 200, message: "", data: "ok" }));
+      const http = new HttpClient({
+        baseUrl: "https://api",
+        auth: { kind: "none" },
+        fetch: fetchImpl,
+        maxRetries: 1,
+      });
+
+      const result = http.get<string>("/x");
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(fetchImpl).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(50_000);
+      await expect(result).resolves.toBe("ok");
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("aborts immediately while waiting to retry", async () => {
+    vi.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      const fetchImpl = vi.fn().mockResolvedValue(
+        mkResponse("busy", { status: 429, headers: { "retry-after": "60" } }),
+      );
+      const http = new HttpClient({
+        baseUrl: "https://api",
+        auth: { kind: "none" },
+        fetch: fetchImpl,
+        maxRetries: 1,
+      });
+
+      const result = http.get("/x", { signal: controller.signal });
+      const rejected = expect(result).rejects.toThrow("stop");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchImpl).toHaveBeenCalledOnce();
+      controller.abort(new Error("stop"));
+      await rejected;
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("never retries a mutating request after an ambiguous server error", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(mkResponse("oops", { status: 503 }));
     const http = new HttpClient({
@@ -187,11 +243,12 @@ describe("HttpClient", () => {
       maxRetries: 0,
     });
 
-    const result = http.get("/documents/x?signer-access-code=top-secret");
+    const result = http.get("/documents/x?signer_access_code=top-secret&token=also-secret");
     await expect(result).rejects.toMatchObject({
-      path: "/documents/x?signer-access-code=[REDACTED]",
+      path: "/documents/x?signer_access_code=[REDACTED]&token=[REDACTED]",
     });
     await expect(result).rejects.not.toHaveProperty("message", expect.stringContaining("top-secret"));
+    await expect(result).rejects.not.toHaveProperty("message", expect.stringContaining("also-secret"));
   });
 
   it("applies retries and rate-limit hooks to raw downloads", async () => {
@@ -218,6 +275,25 @@ describe("HttpClient", () => {
     expect(onRateLimit).toHaveBeenCalledWith({ limit: 100, remaining: 0, resetSeconds: 0 });
   });
 
+  it("does not let a rate-limit observer failure change a successful response", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      mkResponse({ status: 200, message: "", data: "ok" }, {
+        headers: { "x-rate-limit-limit": "100" },
+      }),
+    );
+    const http = new HttpClient({
+      baseUrl: "https://api.example/v1",
+      auth: { kind: "none" },
+      fetch: fetchImpl,
+      onRateLimit: () => {
+        throw new TypeError("application callback failed");
+      },
+    });
+
+    await expect(http.get("/documents")).resolves.toBe("ok");
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
   it("refuses construction without auth credentials", () => {
     expect(
       () =>
@@ -231,6 +307,70 @@ describe("HttpClient", () => {
   it("refuses a relative base URL", () => {
     expect(
       () => new HttpClient({ baseUrl: "/v1", auth: { kind: "none" }, fetch: vi.fn() }),
+    ).toThrow(ConfigurationError);
+  });
+
+  it("refuses credentials, queries, and fragments in a base URL", () => {
+    for (const baseUrl of [
+      "https://user:secret@api.example/v1",
+      "https://api.example/v1?tenant=other",
+      "https://api.example/v1#fragment",
+    ]) {
+      expect(
+        () => new HttpClient({ baseUrl, auth: { kind: "none" }, fetch: vi.fn() }),
+      ).toThrow(ConfigurationError);
+    }
+  });
+
+  it("refuses remote plain HTTP except on loopback", () => {
+    expect(
+      () =>
+        new HttpClient({
+          baseUrl: "http://api.example/v1",
+          auth: { kind: "apiKey", apiKey: "secret" },
+          fetch: vi.fn(),
+        }),
+    ).toThrow("plain HTTP");
+
+    expect(
+      () =>
+        new HttpClient({
+          baseUrl: "http://api.example/v1",
+          auth: { kind: "none" },
+          fetch: vi.fn(),
+        }),
+    ).toThrow("plain HTTP");
+
+    expect(
+      () =>
+        new HttpClient({
+          baseUrl: "http://127.0.0.1:3000/v1",
+          auth: { kind: "apiKey", apiKey: "secret" },
+          fetch: vi.fn(),
+        }),
+    ).not.toThrow();
+  });
+
+  it("validates retry settings", () => {
+    for (const maxRetries of [-1, 0.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(
+        () =>
+          new HttpClient({
+            baseUrl: "https://api.example/v1",
+            auth: { kind: "none" },
+            fetch: vi.fn(),
+            maxRetries,
+          }),
+      ).toThrow(ConfigurationError);
+    }
+    expect(
+      () =>
+        new HttpClient({
+          baseUrl: "https://api.example/v1",
+          auth: { kind: "none" },
+          fetch: vi.fn(),
+          retryBaseDelayMs: Number.NaN,
+        }),
     ).toThrow(ConfigurationError);
   });
 });

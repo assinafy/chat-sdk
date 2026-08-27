@@ -8,9 +8,9 @@
  * @see https://api.assinafy.com.br/v1/docs
  */
 
-import { ApiError } from "./errors.js";
 import { withQuery, type HttpClient } from "./http.js";
-import { csv, toBlobPart } from "./internal.js";
+import { ConfigurationError } from "./errors.js";
+import { csv, pageQuery, toUploadBlob } from "./internal.js";
 import type {
   Document,
   DocumentActivity,
@@ -26,6 +26,8 @@ import type {
   SendPublicTokenResult,
   UploadDocumentInput,
 } from "./types.js";
+
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 const paths = {
   statuses: () => `/documents/statuses`,
@@ -61,8 +63,7 @@ export class DocumentsResource {
         search: query.search,
         tags: csv(query.tags),
         sort: query.sort,
-        page: query.page,
-        "per-page": query.perPage,
+        ...pageQuery(query.page, query.perPage),
       }),
     );
   }
@@ -77,8 +78,7 @@ export class DocumentsResource {
       withQuery(paths.search(accountId), {
         search: query.search,
         status: csv(query.status),
-        page: query.page,
-        "per-page": query.perPage,
+        ...pageQuery(query.page, query.perPage),
       }),
     );
   }
@@ -98,16 +98,18 @@ export class DocumentsResource {
   /**
    * Upload a new document under an account.
    *
+   * Assinafy accepts files up to 25 MB and documents up to 2,000 pages.
    * The body can be a Blob (Browser / Bun), an ArrayBuffer, or a Uint8Array
    * (Node). For Node, prefer reading the file with `fs.readFile` and passing
    * the resulting Buffer (Buffers are Uint8Arrays).
    */
   async upload(accountId: string, input: UploadDocumentInput): Promise<Document> {
+    const size = input.body instanceof Blob ? input.body.size : input.body.byteLength;
+    if (size > MAX_UPLOAD_BYTES) {
+      throw new ConfigurationError("DocumentsResource.upload accepts files up to 25 MB");
+    }
     const form = new FormData();
-    const blob =
-      input.body instanceof Blob
-        ? input.body
-        : new Blob([toBlobPart(input.body)], { type: input.contentType ?? "application/pdf" });
+    const blob = toUploadBlob(input.body, input.contentType, "application/pdf");
     form.append("file", blob, input.filename);
     if (input.tags) {
       for (const tag of input.tags) form.append("tags[]", tag);
@@ -172,25 +174,11 @@ export class DocumentsResource {
     return this.http.get<Document | PublicDocument>(paths.publicGet(documentId));
   }
 
-  /** Public: ask Assinafy to email an access token (`recipient`/`channel` is legacy). */
-  async sendPublicToken(
+  /** Public: ask Assinafy to send a document access token. */
+  sendPublicToken(
     documentId: string,
-    input: SendPublicTokenInput,
+    input?: SendPublicTokenInput,
   ): Promise<SendPublicTokenResult | undefined> {
-    try {
-      return await this.http.put<SendPublicTokenResult | undefined>(paths.sendToken(documentId), input);
-    } catch (error) {
-      if (
-        !(error instanceof ApiError) ||
-        ![400, 422].includes(error.status) ||
-        typeof input.email !== "string"
-      ) {
-        throw error;
-      }
-      return this.http.put<SendPublicTokenResult | undefined>(paths.sendToken(documentId), {
-        recipient: input.email,
-        channel: "email",
-      });
-    }
+    return this.http.put<SendPublicTokenResult | undefined>(paths.sendToken(documentId), input);
   }
 }

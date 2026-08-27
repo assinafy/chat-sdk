@@ -12,6 +12,7 @@ import { loadEnv, makeMinimalPdf } from "../setup.js";
 
 const env = loadEnv();
 const describeLive = env ? describe : describe.skip;
+const itWithNotifications = env?.notificationsEnabled ? it : it.skip;
 
 describeLive("Assinafy API — live sandbox", () => {
   const client = new AssinafyClient({
@@ -91,6 +92,12 @@ describeLive("Assinafy API — live sandbox", () => {
     const fetched = await client.documents.get(doc.id);
     expect(fetched.id).toBe(doc.id);
 
+    const estimate = await client.assignments.estimateCost(doc.id, {
+      method: "virtual",
+      signers: [{}],
+    });
+    expect(typeof estimate.has_sufficient_resources).toBe("boolean");
+
     const listed = await client.documents.list(env!.accountId, { search: filename, perPage: 10 });
     expect(listed.data.some((d) => d.id === doc.id)).toBe(true);
 
@@ -132,7 +139,7 @@ describeLive("Assinafy API — live sandbox", () => {
     cleanup.push(() => client.fields.remove(env!.accountId, field.id));
     expect(field.id).toBeTruthy();
 
-    const listed = await client.fields.list(env!.accountId, { search: name, include_inactive: true });
+    const listed = await client.fields.list(env!.accountId, { include_inactive: true });
     expect(listed.data.some((f) => f.id === field.id)).toBe(true);
 
     const fetched = await client.fields.get(env!.accountId, field.id);
@@ -195,9 +202,7 @@ describeLive("Assinafy API — live sandbox", () => {
     const listed = await client.tags.list(env!.accountId, tagName);
     expect(listed.data.some((t) => t.id === tag.id)).toBe(true);
 
-    // The 2026-08 sandbox still implements the legacy name contract even
-    // though production OpenAPI documents IDs. Unit coverage verifies the
-    // canonical ID payload; this live test preserves and verifies the deployed extension.
+    // The sandbox accepts tag names as well as IDs.
     const setTags = await client.tags.setForDocument(env!.accountId, doc.id, [tagName]);
     expect(setTags.some((t) => t.name === tagName)).toBe(true);
 
@@ -221,7 +226,7 @@ describeLive("Assinafy API — live sandbox", () => {
     await expect(client.documents.get(doc.id)).rejects.toMatchObject({ status: 404 });
   }, 60_000);
 
-  it("templates.list / detail / estimate / instantiate use the sandbox template fixture", async () => {
+  it("templates.list / detail / estimate use the sandbox template fixture", async () => {
     const templates = await client.templates.list(env!.accountId, { perPage: 1 });
     expect(Array.isArray(templates.data)).toBe(true);
     expect(templates.data.length).toBeGreaterThan(0);
@@ -238,6 +243,13 @@ describeLive("Assinafy API — live sandbox", () => {
       signers: [{ role_id: role.id }],
     });
     expect(typeof estimate.has_sufficient_resources).toBe("boolean");
+  });
+
+  itWithNotifications("templates.instantiate creates and cleans up a document", async () => {
+    const templates = await client.templates.list(env!.accountId, { perPage: 1 });
+    const template = templates.data[0]!;
+    const detail = await client.templates.get(env!.accountId, template.id);
+    const role = detail.roles![0]!;
 
     const signer = await ensureSigner(env!.primaryEmail, "Bill M");
     const document = await client.templates.instantiate(env!.accountId, template.id, {
@@ -338,7 +350,7 @@ describeLive("Assinafy API — live sandbox", () => {
       events: ["document_ready"],
       is_active: true,
       url: "https://example.com/assinafy-sandbox-test",
-      email: env!.secondaryEmail,
+      email: "sdk-webhook@example.test",
     });
     expect(subscription.is_active).toBe(true);
     expect((await client.webhooks.inactivate(account.id)).is_active).toBe(false);
@@ -355,6 +367,9 @@ describeLive("Assinafy API — live sandbox", () => {
     const user = await client.users.getCurrent();
     expect(user.id).toBeTruthy();
     expect(user.email).toContain("@");
+
+    const apiKey = await client.auth.getApiKey();
+    expect(apiKey === null || apiKey.api_key === null || typeof apiKey.api_key === "string").toBe(true);
 
     await expectAvailableOrSandbox404(() => client.users.getStats(), (rows) => {
       expect(Array.isArray(rows)).toBe(true);
@@ -402,7 +417,7 @@ describeLive("Assinafy API — live sandbox", () => {
     expect(renamed.name).toContain("renamed-");
   }, 60_000);
 
-  it("full happy path: upload + create signers + create assignment + notification actions", async () => {
+  itWithNotifications("full happy path: upload + create signers + create assignment + notification actions", async () => {
     // Lookup-or-create makes the test idempotent across runs.
     const a = await ensureSigner(env!.primaryEmail, "Bill M");
     const b = await ensureSigner(env!.secondaryEmail, "Bill M");
@@ -442,7 +457,8 @@ describeLive("Assinafy API — live sandbox", () => {
     expect(Array.isArray(whatsappNotifications)).toBe(true);
 
     const token = await client.documents.sendPublicToken(doc.id, {
-      email: env!.primaryEmail,
+      recipient: env!.primaryEmail,
+      channel: "email",
     });
     expect(token === null || token === undefined || typeof token === "object").toBe(true);
 
@@ -472,7 +488,10 @@ describeLive("Assinafy API — live sandbox", () => {
     const signerDocs = await publicClient.signature.listDocuments(a.id, accessCode, { perPage: 1 });
     expect(Array.isArray(signerDocs.data)).toBe(true);
 
-    const signerDownload = await publicClient.signature.downloadDocument(a.id, doc.id, "original", accessCode);
+    const searchedDocs = await publicClient.signature.searchDocuments(a.id, accessCode, doc.name);
+    expect(Array.isArray(searchedDocs.data)).toBe(true);
+
+    const signerDownload = await publicClient.signature.downloadDocument(a.id, doc.id, "original");
     expect(signerDownload.ok).toBe(true);
 
     await publicClient.signature.decline(doc.id, assignment.id, accessCode, "Automated sandbox cleanup");
@@ -486,7 +505,9 @@ describeLive("Assinafy API — live sandbox", () => {
     const page = await client.signers.list(env!.accountId, { search: email, perPage: 50 });
     const existing = page.data.find((s) => s.email === email);
     if (existing) return existing;
-    return client.signers.create(env!.accountId, { full_name: fullName, email });
+    const created = await client.signers.create(env!.accountId, { full_name: fullName, email });
+    cleanup.push(() => client.signers.remove(env!.accountId, created.id));
+    return created;
   }
 
   async function waitForDocument(

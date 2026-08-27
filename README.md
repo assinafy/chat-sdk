@@ -8,22 +8,19 @@
 A TypeScript SDK for the Assinafy v1 document-signing API and for chat-based
 signing workflows.
 
-The client covers all **89 operations across 67 paths** in the production
-OpenAPI snapshot checked on 2026-08-20. It also provides chat orchestration,
-renderable cards, adapter and state contracts, an in-memory test adapter, and
-provider-neutral AI tool definitions.
+The client exposes typed methods for all **89 operations across 67 paths** in
+the Assinafy v1 API. It also provides chat orchestration, renderable cards,
+adapter and state contracts, an in-memory test adapter, and provider-neutral
+AI tool definitions.
 
 ## Documentation
 
 - [API reference](./docs/API_REFERENCE.md) — every public resource method,
   authentication, complete request/response examples, raw downloads, errors,
   chat/cards/adapters/state, and all 36 AI tools.
-- [API coverage](./docs/API_COVERAGE.md) — all 89 production operations with
+- [API operation index](./docs/API_COVERAGE.md) — all 89 official operations with
   exact method, path, authentication, request, response, and SDK mapping.
 - [Official Assinafy API documentation](https://api.assinafy.com.br/v1/docs).
-
-The coverage snapshot is OpenAPI 3.0.0 / API document version 1.0.0, SHA-256
-`44da834c27173a3739d491fdacbb48decf9a170bd776a1c4edb4d0d4b108c22f`.
 
 ## Runtime scope
 
@@ -107,7 +104,20 @@ const client = AssinafyClient.fromEnv();
 optional `ASSINAFY_BASE_URL` and `ASSINAFY_ACCOUNT_ID`. It can also return an
 unauthenticated client for login and public signing operations.
 
-## Common signing workflow
+## Document lifecycle
+
+A production document normally moves through these stages:
+
+1. Create or reuse signer records.
+2. Upload a PDF. Files may be at most 25 MB and 2,000 pages.
+3. Wait for document metadata when the workflow needs page coordinates.
+4. Estimate assignment cost and confirm that the account has enough resources.
+5. Create the assignment. This begins the notification and signing flow.
+6. Track status with webhooks or bounded polling.
+7. Download the certificated artifact after the status becomes `certificated`.
+
+The complete virtual-signature flow below uses polling for clarity. A webhook
+subscription is preferable for long-running production workflows.
 
 ```ts
 import { readFile } from "node:fs/promises";
@@ -122,7 +132,7 @@ if (!process.env.ASSINAFY_API_KEY && !process.env.ASSINAFY_ACCESS_TOKEN) {
 
 const signer = await client.signers.create(accountId, {
   full_name: "Aline Costa",
-  email: "signer@example.com",
+  email: "signer@example.test",
 });
 
 const document = await client.documents.upload(accountId, {
@@ -130,6 +140,38 @@ const document = await client.documents.upload(accountId, {
   body: await readFile("contract.pdf"),
   contentType: "application/pdf",
 });
+
+async function waitForStatus(
+  documentId: string,
+  accepted: ReadonlySet<string>,
+  timeoutMs = 120_000,
+) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const current = await client.documents.get(documentId);
+    if (accepted.has(current.status)) return current;
+    if (["failed", "expired", "rejected_by_signer", "rejected_by_user"].includes(current.status)) {
+      throw new Error(`Document entered terminal status: ${current.status}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+  throw new Error("Timed out waiting for document status");
+}
+
+await waitForStatus(document.id, new Set(["metadata_ready"]));
+
+const estimate = await client.assignments.estimateCost(document.id, {
+  method: "virtual",
+  signers: [
+    {
+      verification_method: "Email",
+      notification_methods: ["Email"],
+    },
+  ],
+});
+if (estimate.has_sufficient_resources === false) {
+  throw new Error(estimate.message ?? estimate.blocking_reason ?? "Insufficient resources");
+}
 
 const assignment = await client.assignments.create(document.id, {
   method: "virtual",
@@ -142,14 +184,32 @@ const assignment = await client.assignments.create(document.id, {
     },
   ],
   message: "Please sign by Friday.",
-  expires_at: "2026-12-31T23:59:59Z",
 });
 
-console.log(assignment.signing_urls);
+console.log(`Assignment created: ${assignment.id}`);
+
+// The signer now completes the signing link delivered by Assinafy. Resume this
+// server-side flow from a webhook, or keep the bounded polling shown here.
+await waitForStatus(document.id, new Set(["certificated"]));
+const certificated = await client.documents.download(document.id, "certificated");
+const bytes = new Uint8Array(await certificated.arrayBuffer());
+console.log(`Downloaded ${bytes.byteLength} certificated bytes`);
 ```
 
-See the [API reference](./docs/API_REFERENCE.md) for collect assignments,
-positioned fields, templates, estimates, retries, signing, and complete payloads.
+Collect assignments require `metadata_ready` because field placements reference
+page IDs and 150-DPI page-image coordinates. See the
+[API reference](./docs/API_REFERENCE.md) for collect assignments, positioned
+fields, templates, webhook subscriptions, retries, signer flows, and complete
+payloads.
+
+### Signing links and access codes
+
+Signer access codes and URLs containing them are credentials. Keep them out of
+logs, analytics, exception messages, source control, and client-visible storage
+not required by the signing UI. Transmit them only over HTTPS, avoid placing
+them in third-party redirect URLs, and redact query strings before recording
+request paths. Let Assinafy deliver signing links through the configured
+notification channels whenever possible.
 
 ## Canonical tags and public tokens
 
@@ -166,18 +226,18 @@ await client.tags.addToDocument(accountId, document.id, [tag.id]);
 await client.tags.removeFromDocument(accountId, document.id, tag.id);
 ```
 
-The production public-token request uses `{ email }`:
+The public-token request uses `{ email }`:
 
 ```ts
 const publicClient = new AssinafyClient();
 await publicClient.documents.sendPublicToken(document.id, {
-  email: "signer@example.com",
+  email: "signer@example.test",
 });
 ```
 
-Older deployments may accept tag names or `{ recipient, channel }`. Those are
-explicitly documented as [live compatibility extensions](./docs/API_REFERENCE.md#live-compatibility-extensions),
-not the canonical production contract.
+`sendPublicToken()` sends the supplied body exactly once. It does not retry a
+rejected request with a different payload because this endpoint can send an
+email or WhatsApp notification.
 
 ## Responses and downloads
 
@@ -208,26 +268,6 @@ Download failures still throw `ApiError`; only the successful body remains raw.
 
 Every request and response shape is shown in the
 [API reference](./docs/API_REFERENCE.md#request-and-response-payloads).
-
-## Sandbox compatibility note
-
-Sandbox verification on 2026-08-20 found deployment drift from production:
-
-- Account creation succeeds with `{ name }`, while the sandbox rejects the
-  production-optional `notification_sender_type` field.
-- Canonical public-token `{ email }` returns `400`; the SDK retries once with
-  exactly `{ recipient: email, channel: "email" }`.
-- Document-tag values are treated as names—even an existing tag ID is used as
-  a new tag name. Production code should continue to send canonical IDs.
-- `client.assignments.list()` returns `400` with an API key because the route
-  lacks a logged-in user's “current account” context; use a bearer token or the
-  assignment expanded by `client.documents.get(documentId)`.
-- Account stats, user stats, and user notification-preference routes returned
-  `404`; their SDK methods remain because all are published production routes.
-
-`client.templates.get(accountId, templateId)` is retained for tested live
-compatibility, but its detail route is absent from the current 89-operation
-production OpenAPI snapshot. Treat it as deployment-specific.
 
 ## Chat quick start
 
@@ -312,6 +352,9 @@ and the dependency-free
 | `ASSINAFY_ACCESS_TOKEN` | none | Alternative bearer token |
 | `ASSINAFY_BASE_URL` | `https://api.assinafy.com.br/v1` | Use `https://sandbox.assinafy.com.br/v1` for sandbox |
 | `ASSINAFY_ACCOUNT_ID` | none | Default account ID exposed as `client.accountId` |
+| `ASSINAFY_TEST_NOTIFICATIONS` | `0` | Set to `1` only when live tests may send sandbox notifications |
+| `ASSINAFY_TEST_EMAIL_PRIMARY` | none | Primary notification-test recipient; required only when notifications are enabled |
+| `ASSINAFY_TEST_EMAIL_SECONDARY` | none | Secondary notification-test recipient; required only when notifications are enabled |
 | `ANTHROPIC_API_KEY` | none | Used only by `examples/ai-bot.ts` |
 | `ANTHROPIC_MODEL` | `claude-sonnet-4-6` | Optional example model override |
 
@@ -341,20 +384,17 @@ npx tsx examples/live-cli.ts
 ## Development and verification
 
 ```bash
-npm run typecheck
-npm run typecheck:examples
-npm run lint
-npm run test:unit
+npm run verify
 npm run test:integration
-npm run build
 ```
 
 Pull-request CI omits credentialed integration tests. Trusted `main` pushes and
 manual workflow runs require the sandbox secrets and fail explicitly when they
 are missing. The live suite uses disposable resources and exercises account
-CRUD/logo, webhook mutation, and template instantiation; run it only against a
-dedicated sandbox account. Unit tests and example type-checking require no
-network access.
+CRUD/logo and webhook mutation; notification delivery and template
+instantiation require `ASSINAFY_TEST_NOTIFICATIONS=1` plus both test email
+variables. Run it only against a dedicated sandbox account. Unit tests and
+example type-checking require no network access.
 
 ## License
 

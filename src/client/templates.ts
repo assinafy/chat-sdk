@@ -6,7 +6,7 @@
  */
 
 import { withQuery, type HttpClient } from "./http.js";
-import { csv } from "./internal.js";
+import { csv, pageQuery } from "./internal.js";
 import type {
   CostEstimate,
   CreateDocumentFromTemplateInput,
@@ -46,8 +46,7 @@ export class TemplatesResource {
         search: query.search,
         tags: csv(query.tags),
         sort: query.sort,
-        page: query.page,
-        "per-page": query.perPage,
+        ...pageQuery(query.page, query.perPage),
       }),
     );
   }

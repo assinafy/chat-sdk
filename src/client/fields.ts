@@ -46,10 +46,6 @@ export class FieldsResource {
       withQuery(paths.collection(accountId), {
         include_inactive: query.include_inactive,
         include_standard: query.include_standard,
-        search: query.search,
-        sort: query.sort,
-        page: query.page,
-        "per-page": query.perPage,
       }),
     );
   }

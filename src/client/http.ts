@@ -41,8 +41,8 @@ export interface HttpClientOptions {
   maxRetries?: number;
   /**
    * Base delay in milliseconds for retry backoff. The actual delay grows
-   * exponentially: `baseDelayMs * 2 ** attempt`, capped at 10s.
-   * Defaults to 250ms.
+   * exponentially: `baseDelayMs * 2 ** attempt`, capped at 10s. A server
+   * `Retry-After` value takes precedence. Defaults to 250ms.
    */
   retryBaseDelayMs?: number;
   /**
@@ -51,7 +51,8 @@ export interface HttpClientOptions {
   userAgent?: string;
   /**
    * Hook called with the last `X-Rate-Limit-*` headers seen. Useful for
-   * surfacing rate-limit info to the host application.
+   * surfacing rate-limit info to the host application. Observer errors are
+   * ignored so they cannot turn a successful API request into a failure.
    */
   onRateLimit?: (limit: RateLimit) => void;
 }
@@ -59,6 +60,8 @@ export interface HttpClientOptions {
 /** Shape returned by {@link HttpClient.request} for callers that need headers too. */
 export interface ResponseWithMeta<T> {
   data: T;
+  /** Message from an Assinafy `{ status, message, data }` response envelope. */
+  message?: string;
   status: number;
   rateLimit?: RateLimit;
   pagination?: Pagination;
@@ -77,6 +80,7 @@ const DEFAULT_USER_AGENT = `@assinafy/chat-sdk/${VERSION}`;
 const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 const RETRYABLE_METHOD = new Set(["GET", "HEAD", "OPTIONS"]);
 const TRANSIENT_ERROR_CODE = new Set(["ECONNRESET", "ETIMEDOUT", "ENOTFOUND", "EAI_AGAIN"]);
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 /**
  * Thin wrapper around `fetch` that knows how to talk to the Assinafy API.
@@ -104,23 +108,45 @@ export class HttpClient {
     if (options.auth.kind === "bearer" && !options.auth.token) {
       throw new ConfigurationError("HttpClient: bearer auth requires a non-empty token");
     }
+    const maxRetries = options.maxRetries ?? 2;
+    const retryBaseDelayMs = options.retryBaseDelayMs ?? 250;
+    if (!Number.isInteger(maxRetries) || maxRetries < 0) {
+      throw new ConfigurationError("HttpClient: maxRetries must be a non-negative integer");
+    }
+    if (!Number.isFinite(retryBaseDelayMs) || retryBaseDelayMs < 0) {
+      throw new ConfigurationError("HttpClient: retryBaseDelayMs must be a non-negative number");
+    }
 
     try {
       const base = new URL(options.baseUrl);
       if (base.protocol !== "https:" && base.protocol !== "http:") throw new Error("unsupported protocol");
-      this.baseUrl = base.href.replace(/\/$/, "");
+      if (base.username || base.password || base.search || base.hash) {
+        throw new ConfigurationError(
+          "HttpClient baseUrl must not contain credentials, a query string, or a fragment",
+        );
+      }
+      if (
+        base.protocol === "http:" &&
+        !["localhost", "127.0.0.1", "[::1]"].includes(base.hostname)
+      ) {
+        throw new ConfigurationError(
+          "HttpClient refuses plain HTTP to a remote host",
+        );
+      }
+      this.baseUrl = base.href.replace(/\/+$/, "");
       this.baseOrigin = base.origin;
-    } catch {
+    } catch (error) {
+      if (error instanceof ConfigurationError) throw error;
       throw new ConfigurationError("HttpClient requires an absolute HTTP(S) baseUrl");
     }
     this.auth = options.auth;
     this.fetchImpl = options.fetch ?? globalThis.fetch;
-    this.maxRetries = options.maxRetries ?? 2;
-    this.retryBaseDelayMs = options.retryBaseDelayMs ?? 250;
+    this.maxRetries = maxRetries;
+    this.retryBaseDelayMs = retryBaseDelayMs;
     this.userAgent = options.userAgent ?? DEFAULT_USER_AGENT;
     this.onRateLimit = options.onRateLimit;
 
-    if (!this.fetchImpl) {
+    if (typeof this.fetchImpl !== "function") {
       throw new ConfigurationError(
         "No fetch implementation available. Pass options.fetch or run on Node 24+ / Bun / Deno / a modern browser.",
       );
@@ -180,7 +206,7 @@ export class HttpClient {
    */
   async request<T>(path: string, init: RequestInit = {}): Promise<ResponseWithMeta<T>> {
     const { response, rateLimit } = await this.send(path, init);
-    return this.parseSuccess<T>(response, redactPath(path), rateLimit);
+    return this.parseSuccess<T>(response, rateLimit);
   }
 
   private buildUrl(path: string): string {
@@ -214,18 +240,23 @@ export class HttpClient {
 
   private async parseSuccess<T>(
     response: Response,
-    path: string,
     rateLimit: RateLimit | undefined,
   ): Promise<ResponseWithMeta<T>> {
     const pagination = readPagination(response.headers);
     const contentType = response.headers.get("content-type") ?? "";
 
     let data: T;
+    let message: string | undefined;
     if (response.status === 204) {
       data = undefined as T;
     } else if (contentType.includes("application/json")) {
       const json = (await response.json()) as ApiEnvelope<T> | T;
-      data = isEnvelope(json) ? (json.data as T) : (json as T);
+      if (isEnvelope(json)) {
+        data = json.data as T;
+        message = json.message;
+      } else {
+        data = json as T;
+      }
     } else {
       // Non-JSON success (e.g. download endpoints). Return the raw Response —
       // resource methods that expect this should use {@link rawRequest}.
@@ -234,6 +265,7 @@ export class HttpClient {
 
     return {
       data,
+      message,
       status: response.status,
       rateLimit,
       pagination,
@@ -270,16 +302,35 @@ export class HttpClient {
       if (retryAfter) {
         // `Retry-After` may be either a number of seconds or an HTTP-date.
         const seconds = Number(retryAfter);
-        if (Number.isFinite(seconds)) return Math.min(Math.max(seconds, 0) * 1000, 10_000);
+        if (Number.isFinite(seconds)) {
+          return Math.min(Math.max(seconds, 0) * 1000, MAX_TIMER_DELAY_MS);
+        }
         const dateMs = Date.parse(retryAfter);
-        if (Number.isFinite(dateMs)) return Math.min(Math.max(dateMs - Date.now(), 0), 10_000);
+        if (Number.isFinite(dateMs)) {
+          return Math.min(Math.max(dateMs - Date.now(), 0), MAX_TIMER_DELAY_MS);
+        }
       }
     }
     return Math.min(this.retryBaseDelayMs * 2 ** attempt, 10_000);
   }
 
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+  private sleep(ms: number, signal?: AbortSignal | null): Promise<void> {
+    if (signal?.aborted) {
+      return Promise.reject(signal.reason ?? new DOMException("The operation was aborted", "AbortError"));
+    }
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        signal?.removeEventListener("abort", onAbort);
+        resolve();
+      }, ms);
+      const onAbort = () => {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
+        reject(signal?.reason ?? new DOMException("The operation was aborted", "AbortError"));
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
+      if (signal?.aborted) onAbort();
+    });
   }
 
   /**
@@ -301,29 +352,37 @@ export class HttpClient {
     let attempt = 0;
 
     while (true) {
+      let response: Response;
       try {
-        const response = await this.fetchImpl(url, { ...init, method, headers, redirect: "manual" });
-        const rateLimit = readRateLimit(response.headers);
-        if (rateLimit) this.onRateLimit?.(rateLimit);
-        if (response.ok) return { response, rateLimit };
-
-        if (this.shouldRetry(response.status, attempt, method)) {
-          await response.body?.cancel().catch(() => undefined);
-          await this.sleep(this.backoff(attempt, response.headers));
-          attempt++;
-          continue;
-        }
-
-        await this.throwFromResponse(response, safePath, method);
+        response = await this.fetchImpl(url, { ...init, method, headers, redirect: "manual" });
       } catch (err) {
-        if (err instanceof ApiError || !RETRYABLE_METHOD.has(method)) throw err;
+        if (!RETRYABLE_METHOD.has(method)) throw err;
         if (attempt < this.maxRetries && isLikelyTransient(err)) {
-          await this.sleep(this.backoff(attempt));
+          await this.sleep(this.backoff(attempt), init.signal);
           attempt++;
           continue;
         }
         throw err;
       }
+
+      const rateLimit = readRateLimit(response.headers);
+      if (rateLimit && this.onRateLimit) {
+        try {
+          this.onRateLimit(rateLimit);
+        } catch {
+          // Observers must not change the request result.
+        }
+      }
+      if (response.ok) return { response, rateLimit };
+
+      if (this.shouldRetry(response.status, attempt, method)) {
+        await response.body?.cancel().catch(() => undefined);
+        await this.sleep(this.backoff(attempt, response.headers), init.signal);
+        attempt++;
+        continue;
+      }
+
+      await this.throwFromResponse(response, safePath, method);
     }
   }
 }
@@ -381,7 +440,10 @@ function isLikelyTransient(err: unknown): boolean {
 }
 
 function redactPath(path: string): string {
-  return path.replace(/([?&](?:access-token|signer-access-code)=)[^&]*/gi, "$1[REDACTED]");
+  return path.replace(
+    /([?&](?:access[-_]token|signer[-_]access[-_]code|access[-_]code|code|token)=)[^&]*/gi,
+    "$1[REDACTED]",
+  );
 }
 
 /** Internal: append a query object to a path, omitting undefined/null values. */

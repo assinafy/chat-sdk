@@ -8,6 +8,7 @@
  */
 
 import { withQuery, type HttpClient } from "./http.js";
+import { pageQuery } from "./internal.js";
 import type {
   ListWebhookDispatchesQuery,
   Page,
@@ -65,8 +66,7 @@ export class WebhooksResource {
         delivered: query.delivered,
         from: query.from,
         to: query.to,
-        page: query.page,
-        "per-page": query.perPage,
+        ...pageQuery(query.page, query.perPage),
       }),
     );
   }

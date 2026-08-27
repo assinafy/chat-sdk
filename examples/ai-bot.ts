@@ -88,7 +88,26 @@ async function main(): Promise<void> {
   if (!process.env.ASSINAFY_ACCOUNT_ID) throw new Error("ASSINAFY_ACCOUNT_ID is required");
 
   const client = AssinafyClient.fromEnv();
-  const tools = createChatTools(client);
+  const tools = createChatTools(client, {
+    include: [
+      "list_accounts",
+      "list_documents",
+      "search_documents",
+      "get_document",
+      "document_activities",
+      "list_document_statuses",
+      "list_signers",
+      "get_signer",
+      "list_templates",
+      "list_tags",
+      "list_fields",
+      "get_field",
+      "list_field_types",
+      "list_webhook_event_types",
+      "list_webhook_dispatches",
+      "verify_document",
+    ],
+  });
   const memory = createMemoryAdapter();
   const chat = new Chat({
     userName: "Assinafy",
@@ -99,7 +118,7 @@ async function main(): Promise<void> {
 
   chat.onFallback(async (thread, msg) => {
     const messages: Message[] = [{ role: "user", content: msg.text }];
-    while (true) {
+    for (let round = 0; round < 8; round++) {
       const response = await createMessage(
         anthropicApiKey,
         process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-6",
@@ -133,6 +152,7 @@ async function main(): Promise<void> {
       }
       messages.push({ role: "user", content: toolResults });
     }
+    throw new Error("AI tool loop exceeded 8 rounds");
   });
 
   await memory.receive({

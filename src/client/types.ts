@@ -96,8 +96,13 @@ export interface DocumentStatsRow {
   documents_uploaded: number;
   documents_sent: number;
   signature_requests: number;
-  signature_requests_email: number;
-  signature_requests_whatsapp: number;
+  signature_requests_notification_bypass: number;
+  signature_requests_notification_email: number;
+  signature_requests_notification_whatsapp: number;
+  signature_requests_verification_bypass: number;
+  signature_requests_verification_email: number;
+  signature_requests_verification_whatsapp: number;
+  signature_requests_verification_digital_certificate: number;
   signature_requests_viewed: number;
   signature_requests_completed: number;
   documents_certified: number;
@@ -127,7 +132,7 @@ export interface LoginResponse {
   access_token: string;
   user: AuthenticatedUser;
   accounts: AuthAccount[];
-  /** Older deployments may also return the token expiration. */
+  /** Token expiration, when supplied by the API. */
   expires_at?: string;
 }
 
@@ -458,9 +463,7 @@ export interface ListDocumentsQuery {
 }
 
 /**
- * Query accepted by signer-facing document lists. Production publishes only
- * `page` and `perPage`; the other document filters remain for compatibility
- * with deployments that already accepted them.
+ * Query accepted by signer-facing document lists.
  */
 export type ListSignerDocumentsQuery = ListDocumentsQuery;
 
@@ -503,8 +506,8 @@ export interface DocumentActivity {
 }
 
 /**
- * Public document token request. `{ email }` is the current OpenAPI body;
- * `{ recipient, channel }` remains available for older sandbox deployments.
+ * Public document token request. Supply either an email or an explicit
+ * recipient/channel pair.
  */
 export type SendPublicTokenInput =
   | { email: string; recipient?: never; channel?: never }
@@ -514,7 +517,7 @@ export type SendPublicTokenInput =
       email?: never;
     };
 
-/** Compatibility payload returned by older public-token deployments. */
+/** Public-token response payload when the API returns delivery details. */
 export interface SendPublicTokenResult {
   document?: PublicDocument | Record<string, unknown>;
   channel?: string;
@@ -616,7 +619,7 @@ interface TemplateSignerOptions {
 export type TemplateSignerInput =
   | (TemplateSignerOptions & { role_id: string; id: string })
   | (TemplateSignerOptions & {
-      /** @deprecated Older deployments accepted an inline signer instead of `id`. */
+      /** @deprecated Use an existing signer `id`. */
       full_name: string;
       role_id?: string;
       id?: string;
@@ -640,11 +643,12 @@ export interface TemplateEditorFieldInput {
 /** Create-document-from-template request. */
 export interface CreateDocumentFromTemplateInput {
   signers: TemplateSignerInput[];
-  /** Object maps are retained for older deployments; current OpenAPI requires the array form. */
+  /** Editor fields; keyed object maps are deprecated in favor of the published array form. */
   editor_fields?: TemplateEditorFieldInput[] | Record<string, unknown>;
   name?: string;
   message?: string;
   expires_at?: string;
+  /** Tag names merged with the template defaults; missing names are created. */
   tags?: string[];
 }
 
@@ -696,14 +700,7 @@ export interface AssignmentEntryInput {
   fields: AssignmentFieldInput[];
 }
 
-/** Create/estimate assignment request. */
-export interface CreateAssignmentInput {
-  method: AssignmentMethod;
-  /** @deprecated Use `signer_ids`; kept for older callers. */
-  signerIds?: string[];
-  signer_ids?: string[];
-  signers?: AssignmentSignerInput[];
-  entries?: AssignmentEntryInput[];
+interface CreateAssignmentOptions {
   message?: string;
   /** @deprecated Use `expires_at`; normalized before sending. */
   expiration?: string;
@@ -711,9 +708,43 @@ export interface CreateAssignmentInput {
   copy_receivers?: string[];
 }
 
+type AssignmentSignerSource =
+  (
+    | {
+        signers: AssignmentSignerInput[];
+        signer_ids?: string[];
+        signerIds?: string[];
+      }
+    | {
+        signers?: AssignmentSignerInput[];
+        signer_ids: string[];
+        signerIds?: string[];
+      }
+    | {
+        signers?: AssignmentSignerInput[];
+        signer_ids?: string[];
+        /** @deprecated Use `signer_ids`. */
+        signerIds: string[];
+      }
+  );
+
+/** Create-assignment request with at least one signer and valid collect entries. */
+export type CreateAssignmentInput = CreateAssignmentOptions &
+  AssignmentSignerSource &
+  (
+    | {
+        method: "collect";
+        entries: AssignmentEntryInput[];
+      }
+    | {
+        method: "virtual";
+        entries?: AssignmentEntryInput[];
+      }
+  );
+
 /** Per-signer input accepted by assignment cost estimation (no signer ID needed). */
 export interface EstimateAssignmentSignerInput {
-  /** Older deployments also accept an existing signer id for estimates. */
+  /** Existing signer id, when estimating for a saved signer. */
   id?: string;
   verification_method?: VerificationMethod;
   notification_methods?: NotificationMethod[];
@@ -722,9 +753,9 @@ export interface EstimateAssignmentSignerInput {
 /** Request accepted by the assignment cost-estimate endpoint. */
 export interface EstimateAssignmentCostInput {
   method?: AssignmentMethod;
-  /** @deprecated Use `signers`; retained for older SDK callers. */
+  /** @deprecated Use `signers`. */
   signerIds?: string[];
-  /** @deprecated Use `signers`; retained for older SDK callers. */
+  /** @deprecated Use `signers`. */
   signer_ids?: string[];
   signers?: EstimateAssignmentSignerInput[];
   entries?: AssignmentEntryInput[];
@@ -743,7 +774,7 @@ export interface ResendNotificationResult {
   signer_id: string;
 }
 
-/** @deprecated Use {@link CostEstimate}; retained for older deployment responses. */
+/** @deprecated Use {@link CostEstimate}. */
 export interface ResendCostEstimate {
   total: number;
   breakdown: Array<{ code: string; name: string; cost: number }>;
@@ -792,10 +823,6 @@ export interface FieldDefinition {
 export interface ListFieldsQuery {
   include_inactive?: boolean;
   include_standard?: boolean;
-  search?: string;
-  sort?: string;
-  page?: number;
-  perPage?: number;
 }
 
 /** Field-definition creation request. */

@@ -9,7 +9,7 @@
  */
 
 import { withQuery, type HttpClient } from "./http.js";
-import { toBlobPart } from "./internal.js";
+import { toUploadBlob } from "./internal.js";
 import type {
   Account,
   AccountTheme,
@@ -92,10 +92,7 @@ export class AccountsResource {
   /** Upload or replace the account logo image. */
   async uploadLogo(accountId: string, input: UploadAccountLogoInput): Promise<void> {
     const form = new FormData();
-    const blob =
-      input.body instanceof Blob
-        ? input.body
-        : new Blob([toBlobPart(input.body)], { type: input.contentType ?? "image/png" });
+    const blob = toUploadBlob(input.body, input.contentType, "image/png");
     form.append("file", blob, input.filename);
     await this.http.request<unknown>(paths.logo(accountId), { method: "POST", body: form });
   }

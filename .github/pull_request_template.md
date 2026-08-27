@@ -12,11 +12,8 @@
 
 ## Test plan
 
-- [ ] `npm run typecheck`
-- [ ] `npm run lint`
-- [ ] `npm run test:unit`
+- [ ] `npm run verify`
 - [ ] `npm run test:integration` (if API-affecting; needs sandbox credentials)
-- [ ] `npm run build`
 
 ## Checklist
 

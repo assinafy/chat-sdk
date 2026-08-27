@@ -93,13 +93,13 @@ function renderElementMarkdown(el: CardElement): string {
     case "fields":
       return el.fields.map((f) => `- **${f.label}:** ${f.value}`).join("\n");
     case "link-button":
-      return `[${el.label}](${el.url})`;
+      return `[${escapeMarkdownLabel(el.label)}](${escapeMarkdownUrl(el.url)})`;
     case "button":
-      return `**[${el.label}]**`;
+      return `**[${escapeMarkdownLabel(el.label)}]**`;
     case "actions":
       return el.children.map(renderElementMarkdown).join(" · ");
     case "image":
-      return `![${el.alt ?? ""}](${el.url})`;
+      return `![${escapeMarkdownLabel(el.alt ?? "")}](${escapeMarkdownUrl(el.url)})`;
     case "table": {
       const header = `| ${el.headers.map(escapeTableCell).join(" | ")} |`;
       const sep = `| ${el.headers.map((_, i) => alignTo(el.align?.[i])).join(" | ")} |`;
@@ -114,7 +114,7 @@ function renderElementMarkdown(el: CardElement): string {
       return [
         `**${el.name}**`,
         `Status: \`${el.status}\``,
-        el.signingUrl ? `[Open document](${el.signingUrl})` : undefined,
+        el.signingUrl ? `[Open document](${escapeMarkdownUrl(el.signingUrl)})` : undefined,
       ]
         .filter((x): x is string => Boolean(x))
         .join("\n");
@@ -184,7 +184,7 @@ function renderElementHtml(el: CardElement): string {
     case "link-button":
       return `<a class="btn btn-${escapeAttr(el.style ?? "primary")}" href="${escapeUrlAttr(el.url)}">${escapeHtml(el.label)}</a>`;
     case "button":
-      return `<button data-action-id="${escapeAttr(el.id)}"${el.value ? ` data-value="${escapeAttr(el.value)}"` : ""}>${escapeHtml(el.label)}</button>`;
+      return `<button type="button" class="btn btn-${escapeAttr(el.style ?? "primary")}" data-action-id="${escapeAttr(el.id)}"${el.value ? ` data-value="${escapeAttr(el.value)}"` : ""}>${escapeHtml(el.label)}</button>`;
     case "actions":
       return `<div class="actions">${el.children.map(renderElementHtml).join("")}</div>`;
     case "image":
@@ -199,7 +199,7 @@ function renderElementHtml(el: CardElement): string {
     }
     case "select":
       return (
-        `<label>${escapeHtml(el.label ?? "")}<select name="${escapeAttr(el.id)}">` +
+        `<label>${escapeHtml(el.label ?? "")}<select name="${escapeAttr(el.id)}"${el.label ? "" : ` aria-label="${escapeAttr(el.placeholder ?? "Select")}"`}>` +
         // `<select>` has no `placeholder` attribute; render it as a disabled,
         // selected leading option instead (valid HTML with the same intent).
         (el.placeholder
@@ -210,7 +210,7 @@ function renderElementHtml(el: CardElement): string {
       );
     case "radio-select":
       return (
-        `<fieldset>${el.label ? `<legend>${escapeHtml(el.label)}</legend>` : ""}` +
+        `<fieldset${el.label ? "" : ` aria-label="Options"`}>${el.label ? `<legend>${escapeHtml(el.label)}</legend>` : ""}` +
         el.options
           .map(
             (o) =>
@@ -273,6 +273,18 @@ function sanitizeUrl(url: string): string {
   const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(cleaned);
   if (scheme && !SAFE_URL_SCHEMES.has(scheme[1]!.toLowerCase())) return "#";
   return cleaned;
+}
+
+function escapeMarkdownLabel(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/[[\]]/g, "\\$&");
+}
+
+function escapeMarkdownUrl(url: string): string {
+  return sanitizeUrl(url)
+    .replace(/[()[\]<>\\]/g, (character) =>
+      `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+    )
+    .replace(/\s/g, (character) => encodeURIComponent(character));
 }
 
 /** Escape + scheme-sanitize a URL for safe use in an `href`/`src` attribute. */

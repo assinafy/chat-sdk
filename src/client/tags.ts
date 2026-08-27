@@ -5,6 +5,7 @@
  */
 
 import { withQuery, type HttpClient } from "./http.js";
+import { pageQuery } from "./internal.js";
 import type { CreateTagInput, ListTagsQuery, Page, Tag, UpdateTagInput } from "./types.js";
 
 export interface DeleteTagResult { deleted: boolean }
@@ -30,8 +31,7 @@ export class TagsResource {
       withQuery(paths.collection(accountId), {
         search: normalized.search,
         sort: normalized.sort,
-        page: normalized.page,
-        "per-page": normalized.perPage,
+        ...pageQuery(normalized.page, normalized.perPage),
       }),
     );
   }
@@ -67,7 +67,7 @@ export class TagsResource {
 
   /**
    * Replace the tags attached to a document with the given tag IDs.
-   * Older sandbox deployments also accept names and create missing tags.
+   * Values are passed through unchanged.
    */
   setForDocument(accountId: string, documentId: string, tagIds: string[]): Promise<Tag[]> {
     return this.http.put<Tag[]>(paths.documentTags(accountId, documentId), { tags: tagIds });

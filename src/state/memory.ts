@@ -1,8 +1,8 @@
 /**
  * In-memory {@link ChatState} implementation.
  *
- * The primary class is {@link MemoryStateAdapter}. `InMemoryState` is kept as
- * a deprecated alias for backwards compatibility.
+ * The primary class is {@link MemoryStateAdapter}. `InMemoryState` is a
+ * deprecated alias.
  *
  * Suitable for unit tests, local dev, and single-process deployments. For
  * multi-process deployments, swap in a Redis- or Postgres-backed
@@ -12,11 +12,11 @@
 import type { ChatState, ThreadSubscription } from "./base.js";
 
 function subscriptionKey(threadId: string, adapter?: string): string {
-  return adapter ? `${adapter}::${threadId}` : `*::${threadId}`;
+  return JSON.stringify([adapter ?? null, threadId]);
 }
 
 function kvKey(threadId: string, key: string): string {
-  return `${threadId}::${key}`;
+  return JSON.stringify([threadId, key]);
 }
 
 export class MemoryStateAdapter implements ChatState {

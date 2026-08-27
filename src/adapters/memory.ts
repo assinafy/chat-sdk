@@ -84,8 +84,8 @@ export class MemoryAdapter extends BaseAdapter {
     return existing;
   }
 
-  override async editMessage(_threadId: string, messageId: string, message: OutgoingMessage): Promise<void> {
-    const idx = this.outbox.findIndex((m) => m.id === messageId);
+  override async editMessage(threadId: string, messageId: string, message: OutgoingMessage): Promise<void> {
+    const idx = this.outbox.findIndex((m) => m.id === messageId && m.threadId === threadId);
     if (idx === -1) throw new Error(`memory adapter: cannot edit unknown message ${messageId}`);
     const target = this.outbox[idx]!;
     this.outbox[idx] = {
@@ -97,8 +97,8 @@ export class MemoryAdapter extends BaseAdapter {
     };
   }
 
-  override async deleteMessage(_threadId: string, messageId: string): Promise<void> {
-    const idx = this.outbox.findIndex((m) => m.id === messageId);
+  override async deleteMessage(threadId: string, messageId: string): Promise<void> {
+    const idx = this.outbox.findIndex((m) => m.id === messageId && m.threadId === threadId);
     if (idx !== -1) this.outbox.splice(idx, 1);
   }
 

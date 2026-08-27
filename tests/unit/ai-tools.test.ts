@@ -132,6 +132,34 @@ describe("createChatTools", () => {
     }
   });
 
+  it("isolates mutable schemas between tools", () => {
+    const tools = createChatTools(fakeClient());
+    const pageSchema = (name: string) => {
+      const tool = tools.find((candidate) => candidate.name === name)!;
+      const properties = tool.input_schema.properties as Record<string, Record<string, unknown>>;
+      return properties.page!;
+    };
+    const signerPage = pageSchema("list_signers");
+    const documentPage = pageSchema("list_documents");
+
+    expect(signerPage).not.toBe(documentPage);
+    signerPage.minimum = 2;
+    expect(documentPage.minimum).toBe(1);
+  });
+
+  it("advertises only supported estimate-assignment signer fields", () => {
+    const tool = createChatTools(fakeClient()).find((candidate) =>
+      candidate.name === "estimate_assignment_cost",
+    )!;
+    const properties = tool.input_schema.properties as Record<string, Record<string, unknown>>;
+    const signerProperties = (properties.signers!.items as Record<string, unknown>).properties as Record<
+      string,
+      unknown
+    >;
+    expect(signerProperties).toHaveProperty("id");
+    expect(signerProperties).not.toHaveProperty("step");
+  });
+
   it("filters by include / exclude", () => {
     const client = fakeClient();
     const onlyRead = createChatTools(client, { include: ["list_signers", "get_document"] });
@@ -167,6 +195,24 @@ describe("createChatTools", () => {
     });
   });
 
+  it("allowlists the assignment payload sent by the AI tool", async () => {
+    const client = fakeClient();
+    const tools = createChatTools(client);
+    await runTool(tools, "create_assignment", {
+      documentId: "d1",
+      method: "virtual",
+      signers: [{ id: "s1" }],
+      unexpected: "do-not-send",
+    });
+
+    const input = (client.assignments.create as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as Record<
+      string,
+      unknown
+    >;
+    expect(input).not.toHaveProperty("documentId");
+    expect(input).not.toHaveProperty("unexpected");
+  });
+
   it("runTool rejects unknown tool names", async () => {
     const tools = createChatTools(fakeClient());
     await expect(runTool(tools, "no_such_tool", {})).rejects.toThrow(/unknown tool/);
@@ -180,6 +226,7 @@ describe("createChatTools", () => {
       /full_name.*required/,
     );
     await expect(runTool(tools, "list_signers", { perPage: 101 })).rejects.toThrow(/at most 100/);
+    await expect(runTool(tools, "list_templates", { page: 0 })).rejects.toThrow(/at least 1/);
     await expect(
       runTool(tools, "estimate_assignment_cost", { documentId: "document" }),
     ).resolves.toBeDefined();

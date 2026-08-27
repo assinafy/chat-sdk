@@ -60,6 +60,15 @@ describe("createMemoryAdapter (factory)", () => {
     expect(adapter.outbox).toHaveLength(0);
   });
 
+  it("does not edit or delete a message through the wrong thread", async () => {
+    const sent = await adapter.postMessage("right-thread", { text: "original" });
+    await expect(
+      adapter.editMessage("wrong-thread", sent.id, { text: "changed" }),
+    ).rejects.toThrow("unknown message");
+    await adapter.deleteMessage("wrong-thread", sent.id);
+    expect(adapter.outbox).toMatchObject([{ threadId: "right-thread", text: "original" }]);
+  });
+
   it("supports listener cleanup, actions, no-op indicators, counts, and reset", async () => {
     const messages: string[] = [];
     const actions: string[] = [];

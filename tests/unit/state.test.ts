@@ -32,6 +32,16 @@ describe("MemoryStateAdapter", () => {
     expect(await state.getThreadValue("t4", "current_doc")).toBeUndefined();
   });
 
+  it("keeps tuple keys distinct when values contain separators", async () => {
+    await state.subscribe("b::c", "a");
+    expect(await state.isSubscribed("c", "a::b")).toBe(false);
+
+    await state.setThreadValue("a", "b::c", "first");
+    await state.setThreadValue("a::b", "c", "second");
+    expect(await state.getThreadValue("a", "b::c")).toBe("first");
+    expect(await state.getThreadValue("a::b", "c")).toBe("second");
+  });
+
   it("listSubscriptions filters by adapter", async () => {
     await state.subscribe("a", "slack");
     await state.subscribe("b", "memory");

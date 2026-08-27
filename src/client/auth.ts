@@ -39,7 +39,11 @@ export class AuthResource {
     await this.http.post<unknown>("/auth/link-social-login", input);
   }
 
-  /** Mint a new API key. Requires the current password to confirm. */
+  /**
+   * Generate an API key after password confirmation. Creating one deletes and
+   * replaces the user's previous key. API keys are server-side credentials and
+   * must not be exposed by front-end applications.
+   */
   createApiKey(password: string): Promise<ApiKeyRecord> {
     return this.http.post<ApiKeyRecord>("/users/api-keys", { password });
   }

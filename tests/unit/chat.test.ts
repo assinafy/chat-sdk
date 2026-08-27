@@ -86,6 +86,57 @@ describe("Chat", () => {
     await expect(c.whenReady()).resolves.toBeUndefined();
   });
 
+  it("rejects an unknown default adapter before initialization", () => {
+    expect(
+      () =>
+        new Chat({
+          userName: "ready-bot",
+          adapters: { memory: createMemoryAdapter() },
+          defaultAdapter: "missing",
+        }),
+    ).toThrow('no adapter registered under name "missing"');
+  });
+
+  it("rejects inherited object properties as adapter names", () => {
+    expect(
+      () =>
+        new Chat({
+          userName: "ready-bot",
+          adapters: { memory: createMemoryAdapter() },
+          defaultAdapter: "toString",
+        }),
+    ).toThrow('no adapter registered under name "toString"');
+    expect(() => chat.thread("constructor", "thread-1")).toThrow(
+      'no adapter registered under name "constructor"',
+    );
+  });
+
+  it("waits for adapter initialization before posting through thread()", async () => {
+    let finishInitialization!: () => void;
+    const initialization = new Promise<void>((resolve) => {
+      finishInitialization = resolve;
+    });
+    const slowAdapter = createMemoryAdapter({ name: "slow" });
+    slowAdapter.initialize = async () => initialization;
+    const c = new Chat({ userName: "ready-bot", adapters: { slow: slowAdapter } });
+
+    const posting = c.thread("slow", "thread-1").post("queued");
+    await Promise.resolve();
+    expect(slowAdapter.outbox).toHaveLength(0);
+
+    finishInitialization();
+    await expect(posting).resolves.toMatchObject({ threadId: "thread-1" });
+    expect(slowAdapter.lastSent?.text).toBe("queued");
+  });
+
+  it("snapshots the adapter map", async () => {
+    const adapters = { memory: createMemoryAdapter() };
+    const c = new Chat({ userName: "ready-bot", adapters });
+    delete (adapters as Partial<typeof adapters>).memory;
+    await expect(c.whenReady()).resolves.toBeUndefined();
+    await expect(c.openThread("person@example.test")).resolves.toBeDefined();
+  });
+
   it("openThread + post(Card(...)) round-trip", async () => {
     const thread = await chat.openThread("alice@example.com");
     await thread.post(Card({ title: "Hi", children: [Text("body")] }));

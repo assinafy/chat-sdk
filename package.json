@@ -13,7 +13,7 @@
   "engines": {
     "node": ">=24"
   },
-  "packageManager": "npm@11.16.0",
+  "packageManager": "npm@11.19.0",
   "publishConfig": {
     "access": "public"
   },
@@ -25,34 +25,64 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     },
     "./client": {
-      "types": "./dist/client/index.d.ts",
-      "import": "./dist/client/index.js",
-      "require": "./dist/client/index.cjs"
+      "import": {
+        "types": "./dist/client/index.d.ts",
+        "default": "./dist/client/index.js"
+      },
+      "require": {
+        "types": "./dist/client/index.d.cts",
+        "default": "./dist/client/index.cjs"
+      }
     },
     "./cards": {
-      "types": "./dist/cards/index.d.ts",
-      "import": "./dist/cards/index.js",
-      "require": "./dist/cards/index.cjs"
+      "import": {
+        "types": "./dist/cards/index.d.ts",
+        "default": "./dist/cards/index.js"
+      },
+      "require": {
+        "types": "./dist/cards/index.d.cts",
+        "default": "./dist/cards/index.cjs"
+      }
     },
     "./adapters": {
-      "types": "./dist/adapters/index.d.ts",
-      "import": "./dist/adapters/index.js",
-      "require": "./dist/adapters/index.cjs"
+      "import": {
+        "types": "./dist/adapters/index.d.ts",
+        "default": "./dist/adapters/index.js"
+      },
+      "require": {
+        "types": "./dist/adapters/index.d.cts",
+        "default": "./dist/adapters/index.cjs"
+      }
     },
     "./state": {
-      "types": "./dist/state/index.d.ts",
-      "import": "./dist/state/index.js",
-      "require": "./dist/state/index.cjs"
+      "import": {
+        "types": "./dist/state/index.d.ts",
+        "default": "./dist/state/index.js"
+      },
+      "require": {
+        "types": "./dist/state/index.d.cts",
+        "default": "./dist/state/index.cjs"
+      }
     },
     "./ai": {
-      "types": "./dist/ai/index.d.ts",
-      "import": "./dist/ai/index.js",
-      "require": "./dist/ai/index.cjs"
+      "import": {
+        "types": "./dist/ai/index.d.ts",
+        "default": "./dist/ai/index.js"
+      },
+      "require": {
+        "types": "./dist/ai/index.d.cts",
+        "default": "./dist/ai/index.cjs"
+      }
     }
   },
   "files": [
@@ -89,11 +119,11 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^24.13.3",
-    "@typescript-eslint/eslint-plugin": "^8.67.0",
-    "@typescript-eslint/parser": "^8.67.0",
+    "@typescript-eslint/eslint-plugin": "^8.68.0",
+    "@typescript-eslint/parser": "^8.68.0",
     "@vitest/coverage-v8": "^4.1.11",
     "dotenv": "^17.4.2",
-    "eslint": "^10.8.1",
+    "eslint": "^10.9.1",
     "tsup": "^8.5.1",
     "tsx": "^4.23.12",
     "typescript": "^6.0.3",

@@ -50,11 +50,37 @@ describe("verifyWebhookSignature", () => {
     ).toThrow(/tolerance/);
   });
 
+  it("rejects invalid timestamp tolerances instead of disabling replay protection", () => {
+    const ts = Math.floor(Date.now() / 1000) - 3600;
+    const sig = sign(secret, `${ts}.${body}`);
+    expect(() =>
+      verifyWebhookSignature({
+        secret,
+        body,
+        signature: sig,
+        timestamp: ts,
+        toleranceSeconds: Number.NaN,
+      }),
+    ).toThrow(/tolerance/);
+  });
+
   it("accepts a base64-encoded signature when configured", () => {
     const sig = sign(secret, body, "base64");
     expect(
       verifyWebhookSignature({ secret, body, signature: sig, encoding: "base64" }),
     ).toBe(true);
+  });
+
+  it("rejects trailing junk instead of accepting a partially decoded digest", () => {
+    const hex = sign(secret, body);
+    const base64 = sign(secret, body, "base64");
+
+    expect(() =>
+      verifyWebhookSignature({ secret, body, signature: `${hex}zz` }),
+    ).toThrow(WebhookSignatureError);
+    expect(() =>
+      verifyWebhookSignature({ secret, body, signature: `${base64}!!`, encoding: "base64" }),
+    ).toThrow(WebhookSignatureError);
   });
 
   it("isValidWebhookSignature returns boolean instead of throwing", () => {

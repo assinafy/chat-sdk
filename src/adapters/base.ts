@@ -54,11 +54,11 @@ export interface IncomingMessage {
    * pointing at the same object.
    */
   author: Identity;
-  /** @deprecated Use {@link author}. Populated by the SDK for backwards compatibility. */
+  /** @deprecated Use {@link author}. Populated by the SDK. */
   from?: Identity;
   /** Whether this message explicitly mentions the bot. */
   isMention: boolean;
-  /** @deprecated Use {@link isMention}. Kept for backwards compatibility. */
+  /** @deprecated Use {@link isMention}. */
   mentionsBot?: boolean;
   /** Normalized attachments. Adapters preserve the raw payload on {@link raw}. */
   attachments?: Attachment[];
@@ -78,7 +78,7 @@ export interface IncomingAction {
   value?: string;
   /** Who clicked / typed it. */
   author: Identity;
-  /** @deprecated Use {@link author}. Populated by the SDK for backwards compatibility. */
+  /** @deprecated Use {@link author}. Populated by the SDK. */
   from?: Identity;
   sentAt: Date;
   raw: unknown;

@@ -8,7 +8,7 @@
  */
 
 import { withQuery, type HttpClient } from "./http.js";
-import { csv, toBlobPart } from "./internal.js";
+import { csv, pageQuery, toBlobPart } from "./internal.js";
 import type {
   Document,
   DocumentArtifactName,
@@ -69,19 +69,35 @@ export class SignatureResource {
   }
 
   /**
-   * Upload a signature image for the signer.
-   *
-   * Production accepts a PNG body without `type`. Older deployments also
-   * accept an explicit type and other image content types. Pass `reuse: true`
-   * to reuse the previously stored image of that type.
+   * Upload a signature or initials image as the raw request body. The published
+   * media type is `image/png`; `type` selects the image kind. When supplied,
+   * `reuse` updates the signer's reusable-signature preference, while omitting
+   * it leaves that preference unchanged.
    */
-  async upload(
+  upload(
+    accessCode: string,
+    image: Blob | ArrayBuffer | Uint8Array,
+    contentType?: string,
+    reuse?: boolean,
+  ): Promise<void>;
+  upload(
     accessCode: string,
     type: SignatureType | undefined,
     image: Blob | ArrayBuffer | Uint8Array,
-    contentType = "image/png",
+    contentType?: string,
     reuse?: boolean,
+  ): Promise<void>;
+  async upload(
+    accessCode: string,
+    ...args:
+      | [Blob | ArrayBuffer | Uint8Array, string?, boolean?]
+      | [SignatureType | undefined, Blob | ArrayBuffer | Uint8Array, string?, boolean?]
   ): Promise<void> {
+    const hasType = typeof args[0] === "string" || args[0] === undefined;
+    const type = hasType ? args[0] : undefined;
+    const image = (hasType ? args[1] : args[0]) as Blob | ArrayBuffer | Uint8Array;
+    const contentType = ((hasType ? args[2] : args[1]) as string | undefined) ?? "image/png";
+    const reuse = (hasType ? args[3] : args[2]) as boolean | undefined;
     const body = image instanceof Blob ? image : new Blob([toBlobPart(image)], { type: contentType });
     await this.http.request<unknown>(
       withQuery(paths.upload(), { "signer-access-code": accessCode, type, reuse }),
@@ -100,7 +116,15 @@ export class SignatureResource {
     );
   }
 
-  /** Fetch the signer-facing document/assignment context after verification. */
+  /**
+   * Fetch the signer-facing document context and mark the document as viewed.
+   * A `409` means the document is still being prepared; retry with backoff.
+   *
+   * Digital-certificate signers must confirm their data and accept the terms
+   * before this request. Send `has_accepted_terms: true` through
+   * `SignersResource.confirmDataForDocument`, or accept terms separately; the
+   * query option here is too late to satisfy that gate.
+   */
   signContext(accessCode: string, options: { hasAcceptedTerms?: boolean } = {}): Promise<Document> {
     return this.http.get<Document>(
       withQuery(paths.sign(), {
@@ -131,8 +155,7 @@ export class SignatureResource {
         search: query.search,
         sort: query.sort,
         tags: csv(query.tags),
-        page: query.page,
-        "per-page": query.perPage,
+        ...pageQuery(query.page, query.perPage),
       }),
     );
   }
@@ -154,7 +177,11 @@ export class SignatureResource {
     );
   }
 
-  /** Submit signer-filled field values for one assignment. */
+  /**
+   * Submit signer-filled values for a collect assignment. Virtual assignments
+   * require confirmed signer data first; digital-certificate assignments use
+   * the certificate signing flow instead of this endpoint.
+   */
   async sign(
     documentId: string,
     assignmentId: string,
@@ -204,17 +231,17 @@ export class SignatureResource {
     );
   }
 
-  /** Download a signer-visible document artifact; older deployments may require an access code. */
+  /**
+   * Download an artifact from the public signer-link endpoint.
+   * @param accessCode Deprecated and ignored; this route is public.
+   */
   downloadDocument(
     signerId: string,
     documentId: string,
     artifactName: DocumentArtifactName,
     accessCode?: string,
   ): Promise<Response> {
-    return this.http.rawRequest(
-      withQuery(paths.signerDownload(signerId, documentId, artifactName), {
-        "signer-access-code": accessCode,
-      }),
-    );
+    void accessCode;
+    return this.http.rawRequest(paths.signerDownload(signerId, documentId, artifactName));
   }
 }

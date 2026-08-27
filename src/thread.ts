@@ -34,21 +34,25 @@ export class Thread implements ThreadLike {
   readonly originatingMessage?: IncomingMessage;
 
   private readonly state: ChatState;
+  private readonly ready?: Promise<void>;
 
   constructor(args: {
     id: string;
     adapter: ChatAdapter;
     state: ChatState;
     originatingMessage?: IncomingMessage;
+    ready?: Promise<void>;
   }) {
     this.id = args.id;
     this.adapter = args.adapter;
     this.state = args.state;
     this.originatingMessage = args.originatingMessage;
+    this.ready = args.ready;
   }
 
   /** Post a reply into this thread. */
-  post(body: PostInput): Promise<SentMessage> {
+  async post(body: PostInput): Promise<SentMessage> {
+    await this.ready;
     return this.adapter.postMessage(this.id, normalize(body));
   }
 

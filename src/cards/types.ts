@@ -181,7 +181,7 @@ export type MessageBody =
       text?: string;
       card?: Card;
       fallbackText?: string;
-      attachments?: Array<{ filename: string; contentType: string; url: string }>;
+      attachments?: Array<{ filename: string; contentType: string; url: string; size?: number }>;
     };
 
 /** Type-guard utility. */

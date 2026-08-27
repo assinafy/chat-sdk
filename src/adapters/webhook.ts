@@ -57,6 +57,10 @@ export function verifyWebhookSignature(options: VerifyWebhookSignatureOptions): 
   const encoding = options.encoding ?? "hex";
   const tolerance = options.toleranceSeconds ?? 300;
 
+  if (!Number.isFinite(tolerance) || tolerance < 0) {
+    throw new WebhookSignatureError("Webhook tolerance must be a non-negative number");
+  }
+
   // An empty secret makes every signature derivable by an attacker, so a
   // misconfigured secret must fail closed rather than "verify" forged requests.
   if (!options.secret) {
@@ -131,12 +135,29 @@ function decodeSignature(signature: string, encoding: "hex" | "base64"): Buffer 
   // alphanumeric token AND followed by non-padding content. That avoids
   // chewing into legitimate base64 `=` padding at the end of a signature.
   const eq = signature.indexOf("=");
+  let encoded = signature;
   if (eq > 0 && eq <= 10) {
     const prefix = signature.slice(0, eq);
     const rest = signature.slice(eq + 1);
     if (/^[a-zA-Z][a-zA-Z0-9_]*$/.test(prefix) && /[^=]/.test(rest)) {
-      return Buffer.from(rest, encoding);
+      encoded = rest;
     }
   }
-  return Buffer.from(signature, encoding);
+
+  if (encoding === "hex") {
+    if (!/^(?:[0-9a-fA-F]{2})+$/.test(encoded)) {
+      throw new WebhookSignatureError("Webhook signature is not valid hex");
+    }
+  } else {
+    const unpadded = encoded.replace(/=+$/, "");
+    if (
+      !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded) ||
+      unpadded.length % 4 === 1 ||
+      (encoded.length !== unpadded.length && encoded.length % 4 !== 0)
+    ) {
+      throw new WebhookSignatureError("Webhook signature is not valid base64");
+    }
+  }
+
+  return Buffer.from(encoded, encoding);
 }

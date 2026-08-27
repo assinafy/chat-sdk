@@ -9,7 +9,7 @@ export default [
   },
   js.configs.recommended,
   {
-    files: ["src/**/*.ts", "tests/**/*.ts", "examples/**/*.ts"],
+    files: ["**/*.ts"],
     languageOptions: {
       parser: tsparser,
       parserOptions: {

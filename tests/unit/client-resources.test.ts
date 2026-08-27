@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { AssinafyClient } from "../../src/client/index.js";
+import { AssinafyClient, ConfigurationError } from "../../src/client/index.js";
 
 interface RecordedRequest {
   url: string;
@@ -78,7 +78,7 @@ describe("AssinafyClient resource paths", () => {
   });
 
   it("expands assignment signerIds/signer_ids into the documented `signers` array", async () => {
-    const { client, requests } = makeClient([{}, {}, {}, {}]);
+    const { client, requests } = makeClient([{}, {}, {}, {}, {}, {}]);
 
     // Both convenience aliases must expand to `signers: [{ id }]` (the only shape
     // the API honors) and merge with any explicit `signers`.
@@ -94,6 +94,16 @@ describe("AssinafyClient resource paths", () => {
       signers: [{ id: "s1" }],
       expiration: "2030-08-03T21:00:00Z",
     });
+    await client.assignments.create("doc 1", {
+      method: "collect",
+      signers: [{ id: "s1" }],
+      entries: [{ page_id: "p1", fields: [] }],
+    });
+    await client.assignments.create("doc 1", {
+      method: "virtual",
+      signer_ids: ["s2", "s3"],
+      signerIds: ["s1", "s2", "s1"],
+    });
 
     expect(requests[0]!.body).toEqual({ method: "virtual", signers: [{ id: "s1" }] });
     expect(requests[1]!.body).toEqual({ method: "virtual", signers: [{ id: "s2" }, { id: "s3" }] });
@@ -107,6 +117,30 @@ describe("AssinafyClient resource paths", () => {
       signers: [{ id: "s1" }],
       expires_at: "2030-08-03T21:00:00Z",
     });
+    expect(requests[4]!.body).toEqual({
+      method: "collect",
+      signers: [{ id: "s1" }],
+      entries: [{ page_id: "p1", fields: [] }],
+    });
+    expect(requests[5]!.body).toEqual({
+      method: "virtual",
+      signers: [{ id: "s2" }, { id: "s3" }, { id: "s1" }],
+    });
+  });
+
+  it("rejects assignments that the API cannot execute", () => {
+    const { client, requests } = makeClient();
+
+    expect(() =>
+      client.assignments.create("doc", { method: "virtual" } as never),
+    ).toThrow("at least one signer");
+    expect(() =>
+      client.assignments.create("doc", {
+        method: "collect",
+        signers: [{ id: "s1" }],
+      } as never),
+    ).toThrow("at least one field entry");
+    expect(requests).toHaveLength(0);
   });
 
   it("covers assignment resend, resend-estimate, reset-expiration, and notifications", async () => {
@@ -173,7 +207,7 @@ describe("AssinafyClient resource paths", () => {
     const { client, requests } = makeClient([{}, [], {}, {}, {}, {}, [], []]);
 
     await client.fields.create("acct", { type: "text", name: "Reference" });
-    await client.fields.list("acct", { include_standard: true, include_inactive: true, perPage: 25 });
+    await client.fields.list("acct", { include_standard: true, include_inactive: true });
     await client.fields.get("acct", "field 1");
     await client.fields.update("acct", "field 1", { name: "Reference ID" });
     await client.fields.validate("acct", "field 1", "abc", { accessCode: "code" });
@@ -192,6 +226,7 @@ describe("AssinafyClient resource paths", () => {
       "DELETE /v1/accounts/acct/fields/field%201",
     ]);
     expect(new URL(requests[1]!.url).searchParams.get("include_standard")).toBe("true");
+    expect(new URL(requests[1]!.url).searchParams.has("per-page")).toBe(false);
     expect(new URL(requests[4]!.url).searchParams.get("signer-access-code")).toBe("code");
     expect(requests[5]!.body).toEqual([{ field_id: "field 1", value: "abc" }]);
   });
@@ -243,13 +278,22 @@ describe("AssinafyClient resource paths", () => {
     expect(requests[2]!.body).toEqual({ document_ids: ["doc1", "doc2"] });
     expect(requests[3]!.body).toEqual({ document_ids: ["doc1"], decline_reason: "No" });
     expect(new URL(requests[4]!.url).pathname).toBe("/v1/signers/signer%201/documents/doc%201/download/original");
+    expect(new URL(requests[4]!.url).searchParams.has("signer-access-code")).toBe(false);
+  });
+
+  it("rejects invalid pagination before transport", () => {
+    const { client, requests } = makeClient();
+
+    expect(() => client.signers.list("acct", { page: 0 })).toThrow("positive integer");
+    expect(() => client.documents.list("acct", { perPage: 101 })).toThrow("between 1 and 100");
+    expect(requests).toHaveLength(0);
   });
 
   it("covers signers resource CRUD paths and self confirm-data", async () => {
     const { client, requests } = makeClient([[], {}, {}, {}, {}, {}]);
 
     await client.signers.list("acct", { search: "alice", perPage: 5 });
-    await client.signers.create("acct", { full_name: "Alice", email: "a@x.com" });
+    await client.signers.create("acct", { full_name: "Alice", email: "signer@example.test" });
     await client.signers.get("acct", "s 1");
     await client.signers.update("acct", "s 1", { full_name: "Alice B" });
     await client.signers.remove("acct", "s 1");
@@ -312,16 +356,26 @@ describe("AssinafyClient resource paths", () => {
     expect(requests[0]!.body).toEqual({ email: "a@example.com" });
   });
 
-  it("falls back to the legacy send-token body after a sandbox validation rejection", async () => {
+  it("allows the documented public-token request without a body", async () => {
+    const { client, requests } = makeClient([{}]);
+
+    await client.documents.sendPublicToken("doc 1");
+
+    expect(requests[0]!.method).toBe("PUT");
+    expect(requests[0]!.body).toBeUndefined();
+    expect(new Headers(requests[0]!.init.headers).has("content-type")).toBe(false);
+  });
+
+  it("never retries a rejected notification request and supports an explicit legacy body", async () => {
     const bodies: unknown[] = [];
-    const fetchImpl = vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
+    const fetchImpl = vi.fn().mockImplementationOnce(async (_url: string, init: RequestInit) => {
       bodies.push(JSON.parse(init.body as string));
-      if (bodies.length === 1) {
-        return new Response(
-          JSON.stringify({ status: 422, message: 'O atributo "channel" é obrigatório.', data: null }),
-          { status: 422, headers: { "content-type": "application/json" } },
-        );
-      }
+      return new Response(
+        JSON.stringify({ status: 422, message: "invalid request", data: null }),
+        { status: 422, headers: { "content-type": "application/json" } },
+      );
+    }).mockImplementationOnce(async (_url: string, init: RequestInit) => {
+      bodies.push(JSON.parse(init.body as string));
       return mkResponse({ recipient: "a@example.com", channel: "email" });
     });
     const client = new AssinafyClient({
@@ -330,7 +384,15 @@ describe("AssinafyClient resource paths", () => {
       maxRetries: 0,
     });
 
-    await client.documents.sendPublicToken("doc", { email: "a@example.com" });
+    await expect(
+      client.documents.sendPublicToken("doc", { email: "a@example.com" }),
+    ).rejects.toMatchObject({ status: 422 });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+
+    await client.documents.sendPublicToken("doc", {
+      recipient: "a@example.com",
+      channel: "email",
+    });
     expect(bodies).toEqual([
       { email: "a@example.com" },
       { recipient: "a@example.com", channel: "email" },
@@ -354,7 +416,23 @@ describe("AssinafyClient resource paths", () => {
   });
 
   it("covers the accounts resource (CRUD, theme, logo, force delete)", async () => {
-    const { client, requests } = makeClient([[], {}, {}, {}, {}, {}, [], {}]);
+    const stats = [{
+      period: "2026-08-01",
+      documents_uploaded: 1,
+      documents_sent: 1,
+      signature_requests: 1,
+      signature_requests_notification_bypass: 0,
+      signature_requests_notification_email: 1,
+      signature_requests_notification_whatsapp: 0,
+      signature_requests_verification_bypass: 0,
+      signature_requests_verification_email: 1,
+      signature_requests_verification_whatsapp: 0,
+      signature_requests_verification_digital_certificate: 0,
+      signature_requests_viewed: 1,
+      signature_requests_completed: 1,
+      documents_certified: 1,
+    }];
+    const { client, requests } = makeClient([[], {}, {}, {}, {}, {}, stats, {}]);
 
     await client.accounts.list();
     await client.accounts.create({ name: "Acme", notification_sender_type: "Account" });
@@ -362,7 +440,9 @@ describe("AssinafyClient resource paths", () => {
     await client.accounts.update("acct", { name: "Acme Inc." });
     await client.accounts.remove("acct", { force: true });
     await client.accounts.getTheme("acct");
-    await client.accounts.getStats("acct", { granularity: "daily", month: "2026-08" });
+    await expect(
+      client.accounts.getStats("acct", { granularity: "daily", month: "2026-08" }),
+    ).resolves.toEqual(stats);
     await client.accounts.deleteLogo("acct");
 
     expect(requests.map((r) => `${r.method} ${new URL(r.url).pathname}`)).toEqual([
@@ -430,7 +510,7 @@ describe("AssinafyClient resource paths", () => {
     expect(new URL(requests[1]!.url).searchParams.has("signer-access-code")).toBe(false);
   });
 
-  it("covers every authentication route and compatibility helper", async () => {
+  it("covers every authentication route and alias", async () => {
     const { client, requests } = makeClient([
       {}, {}, {}, {}, { api_key: "masked" }, { api_key: "masked" }, {}, {}, {}, {}, {},
     ]);
@@ -497,6 +577,24 @@ describe("AssinafyClient resource paths", () => {
     expect(requests[0]!.body).toBeInstanceOf(FormData);
   });
 
+  it("honors upload MIME overrides and rejects files over 25 MB before transport", async () => {
+    const { client, requests } = makeClient([{}]);
+
+    await client.documents.upload("acct", {
+      filename: "contract.pdf",
+      body: new Blob(["pdf"], { type: "text/plain" }),
+      contentType: "application/pdf",
+    });
+    const file = (requests[0]!.body as FormData).get("file") as Blob;
+    expect(file.type).toBe("application/pdf");
+
+    await expect(client.documents.upload("acct", {
+      filename: "too-large.pdf",
+      body: new ArrayBuffer(25 * 1024 * 1024 + 1),
+    })).rejects.toBeInstanceOf(ConfigurationError);
+    expect(requests).toHaveLength(1);
+  });
+
   it("covers tag CRUD and document attachment routes with tag IDs", async () => {
     const { client, requests } = makeClient([[], {}, {}, [], [], [], {}, {}]);
 
@@ -541,6 +639,7 @@ describe("AssinafyClient resource paths", () => {
     await client.assignments.decline("doc 1", "assignment 1", "secret", "No");
     await client.accounts.downloadLogo("acct");
     await client.accounts.uploadLogo("acct", { filename: "logo.png", body: new Uint8Array([1]) });
+    await client.signature.upload("secret", new Uint8Array([1]));
 
     expect(requests[1]!.body).toBeInstanceOf(Blob);
     expect(new URL(requests[2]!.url).searchParams.has("type")).toBe(false);

@@ -21,7 +21,7 @@ jobs:
   verify:
     name: Verify package
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -33,7 +33,7 @@ jobs:
       - name: Use Node.js 24
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "24"
+          node-version-file: .nvmrc
           cache: npm
 
       - name: Install dependencies
@@ -70,6 +70,24 @@ jobs:
 
       - name: Verify SDK
         run: npm run verify
+
+      - name: Require sandbox credentials
+        env:
+          ASSINAFY_API_KEY: ${{ secrets.ASSINAFY_API_KEY }}
+          ASSINAFY_ACCOUNT_ID: ${{ secrets.ASSINAFY_ACCOUNT_ID }}
+        run: |
+          if [ -z "$ASSINAFY_API_KEY" ] || [ -z "$ASSINAFY_ACCOUNT_ID" ]; then
+            echo "::error::ASSINAFY_API_KEY and ASSINAFY_ACCOUNT_ID are required for release verification."
+            exit 1
+          fi
+
+      - name: Verify against the sandbox
+        env:
+          ASSINAFY_BASE_URL: https://sandbox.assinafy.com.br/v1
+          ASSINAFY_API_KEY: ${{ secrets.ASSINAFY_API_KEY }}
+          ASSINAFY_ACCOUNT_ID: ${{ secrets.ASSINAFY_ACCOUNT_ID }}
+          ASSINAFY_TEST_NOTIFICATIONS: "0"
+        run: npm run test:integration
 
       - name: Pack release artifact
         run: npm pack --ignore-scripts
