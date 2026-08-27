@@ -1,6 +1,6 @@
 {
   "name": "@assinafy/chat-sdk",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Chat SDK for Assinafy — build chat bots and conversational integrations on top of the Assinafy document-signing API.",
   "license": "MIT",
   "author": "Assinafy",

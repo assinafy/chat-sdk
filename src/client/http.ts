@@ -75,7 +75,7 @@ export interface ResponseWithMeta<T> {
  * User-Agent never drifts from the published version.
  */
 declare const __SDK_VERSION__: string | undefined;
-const VERSION = typeof __SDK_VERSION__ !== "undefined" ? __SDK_VERSION__ : "2.0.0";
+const VERSION = typeof __SDK_VERSION__ !== "undefined" ? __SDK_VERSION__ : "2.0.1";
 const DEFAULT_USER_AGENT = `@assinafy/chat-sdk/${VERSION}`;
 const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 const RETRYABLE_METHOD = new Set(["GET", "HEAD", "OPTIONS"]);
