@@ -170,7 +170,30 @@ describe("AssinafyClient resource paths", () => {
         signers: [{ id: "s1" }],
       } as never),
     ).toThrow("at least one field entry");
+    // The API prices per signer in both modes and refuses a signer-less estimate.
+    expect(() =>
+      client.assignments.estimateCost("doc", {
+        method: "collect",
+        entries: [{ page_id: "p1", fields: [] }],
+      } as never),
+    ).toThrow("at least one signer");
     expect(requests).toHaveLength(0);
+  });
+
+  it("sends signers alongside entries for a collect estimate", async () => {
+    const { client, requests } = makeClient([{}]);
+
+    await client.assignments.estimateCost("doc 1", {
+      method: "collect",
+      signers: [{ verification_method: "DigitalCertificate" }],
+      entries: [{ page_id: "p1", fields: [] }],
+    });
+
+    expect(requests[0]!.body).toEqual({
+      method: "collect",
+      signers: [{ verification_method: "DigitalCertificate" }],
+      entries: [{ page_id: "p1", fields: [] }],
+    });
   });
 
   it("covers assignment resend, resend-estimate, reset-expiration, and notifications", async () => {

@@ -69,9 +69,19 @@ export class AssignmentsResource {
     return this.http.post<Assignment>(paths.collection(documentId), body);
   }
 
-  /** Estimate the cost of an assignment without creating it. */
+  /**
+   * Estimate the cost of an assignment without creating it.
+   *
+   * The published contract marks `signers` as required only for `virtual`, but the API prices per
+   * signer in both methods and answers a signer-less estimate with
+   * `400 "Pelo menos um signatários precisa ser informado."`
+   */
   estimateCost(documentId: string, input: EstimateAssignmentCostInput): Promise<CostEstimate> {
-    return this.http.post<CostEstimate>(paths.estimate(documentId), normalizeAssignmentInput(input));
+    const body = normalizeAssignmentInput(input);
+    if (!Array.isArray(body.signers) || body.signers.length === 0) {
+      throw new ConfigurationError("AssignmentsResource.estimateCost requires at least one signer");
+    }
+    return this.http.post<CostEstimate>(paths.estimate(documentId), body);
   }
 
   /** Resend the assignment notification to one signer. */
