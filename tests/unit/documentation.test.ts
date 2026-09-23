@@ -7,6 +7,7 @@ const RESOURCE_NAMES = [
   "auth",
   "documents",
   "fields",
+  "oauth",
   "signature",
   "signers",
   "tags",
@@ -27,7 +28,11 @@ describe("published documentation", () => {
             new URL(`../../src/client/${resource}.ts`, import.meta.url),
             "utf8",
           );
-          return [...source.matchAll(/^ {2}(?:async )?\*?([a-z]\w*)\s*\(/gm)]
+          // Only the resource class itself. Module-level helpers below it are
+          // indented the same way, so matching the whole file would pick up
+          // statements inside them as if they were public methods.
+          const classBody = source.slice(source.indexOf("export class")).split(/^\}/m)[0]!;
+          return [...classBody.matchAll(/^ {2}(?:async )?\*?([a-z]\w*)\s*\(/gm)]
             .map((match) => match[1]!)
             .filter((method) => method !== "constructor")
             .map((method) => `${resource}.${method}`);
@@ -49,7 +54,7 @@ describe("published documentation", () => {
       );
     }
     const operationLinks = [...coverage.matchAll(/API_REFERENCE\.md#([a-z0-9-]+)/g)].map((match) => match[1]!);
-    expect(operationLinks.length).toBeGreaterThanOrEqual(89 * 2);
+    expect(operationLinks.length).toBeGreaterThanOrEqual(93 * 2);
     expect([...new Set(operationLinks.filter((anchor) => !anchors.has(anchor)))]).toEqual([]);
 
     const jsonBlocks = [...reference.matchAll(/```json\n([\s\S]*?)\n```/g)].map((match) => match[1]!);

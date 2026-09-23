@@ -12,7 +12,7 @@
  * available in Node 24+, Bun, Deno, and modern browsers.
  */
 
-import { ApiError, ConfigurationError } from "./errors.js";
+import { ApiError, ConfigurationError, OAuthError } from "./errors.js";
 import type { ApiEnvelope, Page, Pagination, RateLimit } from "./types.js";
 
 /** Authentication strategies supported by the Assinafy API. */
@@ -75,7 +75,7 @@ export interface ResponseWithMeta<T> {
  * User-Agent never drifts from the published version.
  */
 declare const __SDK_VERSION__: string | undefined;
-const VERSION = typeof __SDK_VERSION__ !== "undefined" ? __SDK_VERSION__ : "2.0.2";
+const VERSION = typeof __SDK_VERSION__ !== "undefined" ? __SDK_VERSION__ : "2.2.0";
 const DEFAULT_USER_AGENT = `@assinafy/chat-sdk/${VERSION}`;
 const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 const RETRYABLE_METHOD = new Set(["GET", "HEAD", "OPTIONS"]);
@@ -91,7 +91,12 @@ const MAX_TIMER_DELAY_MS = 2_147_483_647;
 export class HttpClient {
   readonly baseUrl: string;
   readonly auth: AuthStrategy;
-  private readonly baseOrigin: string;
+  /**
+   * Scheme + host of {@link baseUrl}, without the `/v1` path. The
+   * `.well-known` discovery documents and the OAuth resource indicator live
+   * at the host root rather than under the versioned prefix.
+   */
+  readonly origin: string;
   private readonly fetchImpl: typeof fetch;
   private readonly maxRetries: number;
   private readonly retryBaseDelayMs: number;
@@ -134,7 +139,7 @@ export class HttpClient {
         );
       }
       this.baseUrl = base.href.replace(/\/+$/, "");
-      this.baseOrigin = base.origin;
+      this.origin = base.origin;
     } catch (error) {
       if (error instanceof ConfigurationError) throw error;
       throw new ConfigurationError("HttpClient requires an absolute HTTP(S) baseUrl");
@@ -151,6 +156,29 @@ export class HttpClient {
         "No fetch implementation available. Pass options.fetch or run on Node 24+ / Bun / Deno / a modern browser.",
       );
     }
+  }
+
+  /**
+   * Clone this transport with a different base URL and/or authentication
+   * strategy, keeping every other setting (fetch implementation, retry policy,
+   * User-Agent, rate-limit observer).
+   *
+   * Two OAuth cases need it: the token and revocation endpoints authenticate
+   * the *application* with `client_id`/`client_secret`, so sending the
+   * integrator's own `X-Api-Key` alongside would hand a workspace credential
+   * to a route that has no use for it; and the authorization server's metadata
+   * lives on a different host from the API.
+   */
+  fork(overrides: { baseUrl?: string; auth?: AuthStrategy } = {}): HttpClient {
+    return new HttpClient({
+      baseUrl: overrides.baseUrl ?? this.baseUrl,
+      auth: overrides.auth ?? this.auth,
+      fetch: this.fetchImpl,
+      maxRetries: this.maxRetries,
+      retryBaseDelayMs: this.retryBaseDelayMs,
+      userAgent: this.userAgent,
+      onRateLimit: this.onRateLimit,
+    });
   }
 
   /** Convenience: GET that returns just the unwrapped data. */
@@ -212,7 +240,7 @@ export class HttpClient {
   private buildUrl(path: string): string {
     if (path.startsWith("http://") || path.startsWith("https://")) {
       const url = new URL(path);
-      if (url.origin !== this.baseOrigin) {
+      if (url.origin !== this.origin) {
         throw new ConfigurationError("HttpClient refuses to send credentials to a different origin");
       }
       return url.href;
@@ -285,11 +313,16 @@ export class HttpClient {
     } catch {
       body = undefined;
     }
+    const wwwAuthenticate = response.headers.get("www-authenticate") ?? undefined;
+    const oauth = readOAuthError(body, wwwAuthenticate);
     const message =
+      oauth?.errorDescription ||
       (isEnvelope(body) && body.message) ||
       (isRecord(body) && typeof body.message === "string" && body.message) ||
+      (oauth && `Assinafy OAuth ${method} ${path} failed: ${oauth.error}`) ||
       `Assinafy API ${method} ${path} failed with status ${response.status}`;
-    throw new ApiError({ status: response.status, body, path, method, message });
+    const args = { status: response.status, body, path, method, message, wwwAuthenticate };
+    throw oauth ? new OAuthError({ ...args, ...oauth }) : new ApiError(args);
   }
 
   private shouldRetry(status: number, attempt: number, method: string): boolean {
@@ -396,6 +429,40 @@ function withJsonBody(init: RequestInit, method: string, body: unknown): Request
   const headers = new Headers(init.headers ?? {});
   if (!headers.has("content-type")) headers.set("content-type", "application/json");
   return { ...init, method, headers, body: JSON.stringify(body) };
+}
+
+/**
+ * Pull an RFC 6749 error out of a failed response, from the flat
+ * `{ error, error_description }` body the OAuth endpoints return or from a
+ * `WWW-Authenticate: Bearer error="…", scope="…"` challenge. Returns
+ * `undefined` when the response is an ordinary Assinafy error, so only OAuth
+ * failures are upgraded to {@link OAuthError}.
+ */
+function readOAuthError(
+  body: unknown,
+  wwwAuthenticate: string | undefined,
+): { error: string; errorDescription?: string; scope?: string } | undefined {
+  if (isRecord(body) && typeof body.error === "string" && body.error) {
+    return {
+      error: body.error,
+      errorDescription: typeof body.error_description === "string" ? body.error_description : undefined,
+      scope: challengeParam(wwwAuthenticate, "scope"),
+    };
+  }
+  const error = challengeParam(wwwAuthenticate, "error");
+  if (!error) return undefined;
+  return {
+    error,
+    errorDescription: challengeParam(wwwAuthenticate, "error_description"),
+    scope: challengeParam(wwwAuthenticate, "scope"),
+  };
+}
+
+/** Read one `name="value"` parameter out of a `WWW-Authenticate` challenge. */
+function challengeParam(challenge: string | undefined, name: string): string | undefined {
+  if (!challenge) return undefined;
+  const match = new RegExp(`\\b${name}="([^"]*)"`).exec(challenge);
+  return match?.[1] || undefined;
 }
 
 function isEnvelope(value: unknown): value is ApiEnvelope<unknown> {

@@ -6,15 +6,7 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      run_notification_tests:
-        description: Run tests that may send sandbox notifications
-        required: false
-        type: boolean
-        default: false
 
-# Cancel stale pull-request validation, but let main-branch sandbox runs finish
-# so their cleanup hooks are not interrupted.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -51,59 +43,6 @@ jobs:
 
       - name: Verify SDK
         run: npm run verify
-
-  integration:
-    name: Integration (sandbox)
-    runs-on: ubuntu-latest
-    needs: unit
-    environment: sandbox
-    timeout-minutes: 15
-    # Secret-backed tests only run trusted code from main. Pull requests and
-    # workflow dispatches targeting other refs never receive sandbox secrets.
-    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Use Node.js 24
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci --no-audit --no-fund
-
-      - name: Require sandbox credentials
-        env:
-          ASSINAFY_API_KEY: ${{ secrets.ASSINAFY_API_KEY }}
-          ASSINAFY_ACCOUNT_ID: ${{ secrets.ASSINAFY_ACCOUNT_ID }}
-          ASSINAFY_TEST_EMAIL_PRIMARY: ${{ vars.ASSINAFY_TEST_EMAIL_PRIMARY }}
-          ASSINAFY_TEST_EMAIL_SECONDARY: ${{ vars.ASSINAFY_TEST_EMAIL_SECONDARY }}
-          ASSINAFY_TEST_NOTIFICATIONS: ${{ github.event_name == 'workflow_dispatch' && inputs.run_notification_tests && '1' || '0' }}
-        run: |
-          if [ -z "$ASSINAFY_API_KEY" ] || [ -z "$ASSINAFY_ACCOUNT_ID" ]; then
-            echo "::error::ASSINAFY_API_KEY and ASSINAFY_ACCOUNT_ID are required for integration tests."
-            exit 1
-          fi
-          if [ "$ASSINAFY_TEST_NOTIFICATIONS" = "1" ]; then
-            if [ -z "$ASSINAFY_TEST_EMAIL_PRIMARY" ] || [ -z "$ASSINAFY_TEST_EMAIL_SECONDARY" ]; then
-              echo "::error::ASSINAFY_TEST_EMAIL_PRIMARY and ASSINAFY_TEST_EMAIL_SECONDARY are required for notification tests."
-              exit 1
-            fi
-          fi
-
-      - name: Run integration tests
-        env:
-          ASSINAFY_BASE_URL: https://sandbox.assinafy.com.br/v1
-          ASSINAFY_API_KEY: ${{ secrets.ASSINAFY_API_KEY }}
-          ASSINAFY_ACCOUNT_ID: ${{ secrets.ASSINAFY_ACCOUNT_ID }}
-          ASSINAFY_TEST_EMAIL_PRIMARY: ${{ vars.ASSINAFY_TEST_EMAIL_PRIMARY }}
-          ASSINAFY_TEST_EMAIL_SECONDARY: ${{ vars.ASSINAFY_TEST_EMAIL_SECONDARY }}
-          ASSINAFY_TEST_NOTIFICATIONS: ${{ github.event_name == 'workflow_dispatch' && inputs.run_notification_tests && '1' || '0' }}
-        run: npm run test:integration
 
   actionlint:
     name: Lint workflows

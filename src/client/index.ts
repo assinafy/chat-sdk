@@ -27,6 +27,7 @@ import { DocumentsResource } from "./documents.js";
 import { FieldsResource } from "./fields.js";
 import { ConfigurationError } from "./errors.js";
 import { HttpClient, type AuthStrategy, type HttpClientOptions } from "./http.js";
+import { OAuthResource } from "./oauth.js";
 import { SignatureResource } from "./signature.js";
 import { SignersResource } from "./signers.js";
 import { TagsResource } from "./tags.js";
@@ -40,6 +41,13 @@ export { HttpClient, withQuery } from "./http.js";
 export type { AuthStrategy, HttpClientOptions, ResponseWithMeta } from "./http.js";
 export { AccountsResource, type UploadAccountLogoInput } from "./accounts.js";
 export { AuthResource } from "./auth.js";
+export {
+  OAuthResource,
+  type AuthorizationCallbackParams,
+  type CreateAuthorizationUrlOptions,
+  type ExpectedAuthorizationRequest,
+  type OAuthClientAuth,
+} from "./oauth.js";
 export { SignersResource } from "./signers.js";
 export { DocumentsResource } from "./documents.js";
 export { FieldsResource } from "./fields.js";
@@ -59,7 +67,11 @@ export interface AssinafyClientOptions extends Omit<HttpClientOptions, "auth" | 
   baseUrl?: string;
   /** Long-lived API key. Mutually exclusive with `accessToken`. */
   apiKey?: string;
-  /** Bearer access token (e.g. obtained from `auth.login`). */
+  /**
+   * Bearer access token — an OAuth access token from
+   * {@link OAuthResource.exchangeCode}, or one obtained from `auth.login`.
+   * Mutually exclusive with `apiKey`.
+   */
   accessToken?: string;
   /**
    * Default account id. Optional — every resource method takes an explicit
@@ -96,6 +108,7 @@ export class AssinafyClient {
 
   readonly accounts: AccountsResource;
   readonly auth: AuthResource;
+  readonly oauth: OAuthResource;
   readonly signers: SignersResource;
   readonly documents: DocumentsResource;
   readonly fields: FieldsResource;
@@ -119,6 +132,7 @@ export class AssinafyClient {
     this.accountId = accountId;
     this.accounts = new AccountsResource(this.http);
     this.auth = new AuthResource(this.http);
+    this.oauth = new OAuthResource(this.http);
     this.signers = new SignersResource(this.http);
     this.documents = new DocumentsResource(this.http);
     this.fields = new FieldsResource(this.http);

@@ -952,3 +952,119 @@ export interface ListWebhookDispatchesQuery {
   page?: number;
   perPage?: number;
 }
+
+// ---------------------------------------------------------------------------
+// OAuth 2.1 / OpenID Connect
+// ---------------------------------------------------------------------------
+
+/**
+ * Permissions an application can request. `offline_access` is a request-time
+ * signal that asks for a refresh token rather than a permission the API
+ * enforces, which is why it is absent from the protected resource's
+ * `scopes_supported` while the authorization server still accepts it.
+ */
+export type OAuthScope =
+  | "documents:read"
+  | "documents:write"
+  | "templates:read"
+  | "templates:write"
+  | "account:read"
+  | "webhooks:write"
+  | "openid"
+  | "profile"
+  | "email"
+  | "offline_access"
+  | (string & {});
+
+/** RFC 9728 protected-resource metadata, served at the API host root. */
+export interface OAuthProtectedResourceMetadata {
+  /** Canonical identifier of this API, e.g. `https://api.assinafy.com.br`. */
+  resource: string;
+  /** Issuers allowed to mint tokens for it, e.g. `https://auth.assinafy.com.br`. */
+  authorization_servers: string[];
+  scopes_supported: OAuthScope[];
+  /** Where a token may be presented. Assinafy accepts `header` only. */
+  bearer_methods_supported?: string[];
+  [key: string]: unknown;
+}
+
+/** RFC 8414 authorization-server metadata, served by the authorization host. */
+export interface OAuthAuthorizationServerMetadata {
+  issuer: string;
+  authorization_endpoint: string;
+  token_endpoint: string;
+  revocation_endpoint?: string;
+  userinfo_endpoint?: string;
+  jwks_uri?: string;
+  scopes_supported?: OAuthScope[];
+  response_types_supported?: string[];
+  grant_types_supported?: string[];
+  code_challenge_methods_supported?: string[];
+  token_endpoint_auth_methods_supported?: string[];
+  authorization_response_iss_parameter_supported?: boolean;
+  [key: string]: unknown;
+}
+
+/**
+ * Everything one connection attempt produced. Store the whole object in the
+ * user's session: the callback needs `state` and `issuer` to be validated
+ * against, and the token exchange needs `codeVerifier`.
+ */
+export interface OAuthAuthorizationRequest {
+  /** The consent URL to navigate the browser to, with a full page load. */
+  url: string;
+  /** CSRF value echoed back on the callback. */
+  state: string;
+  /** RFC 7636 verifier. Never leaves your server. */
+  codeVerifier: string;
+  /** RFC 7636 `S256` challenge derived from the verifier. */
+  codeChallenge: string;
+  /** Issuer the callback's `iss` must equal. */
+  issuer: string;
+  /** Redirect URI sent, which the token exchange has to repeat verbatim. */
+  redirectUri: string;
+  /** Space-separated scopes requested. */
+  scope: string;
+  /** OIDC nonce, when one was requested. */
+  nonce?: string;
+}
+
+/** A validated authorization callback. */
+export interface OAuthAuthorizationCallback {
+  /** Single-use authorization code, valid for 60 seconds. */
+  code: string;
+  /** The `state` that was echoed back, already checked against the request. */
+  state: string;
+  /** The `iss` that was echoed back, already checked against the request. */
+  issuer?: string;
+}
+
+/** RFC 6749 §5.1 token response. Never wrapped in the API's usual envelope. */
+export interface OAuthTokenResponse {
+  access_token: string;
+  token_type: string;
+  /** Lifetime of `access_token` in seconds. One hour in practice. */
+  expires_in: number;
+  /**
+   * Present only when `offline_access` was requested and granted. Rotates on
+   * every refresh — persist the new value before using it.
+   */
+  refresh_token?: string | null;
+  /** Permissions the token actually carries. Read it instead of assuming. */
+  scope?: string;
+  /** Signed OIDC identity token (RS256). Present only with the `openid` scope. */
+  id_token?: string | null;
+  [key: string]: unknown;
+}
+
+/** OpenID Connect userinfo claims. */
+export interface OAuthUserInfo {
+  /** Stable identifier of the user who approved the connection. */
+  sub: string;
+  /** Requires the `profile` scope. */
+  name?: string | null;
+  /** Requires the `email` scope. */
+  email?: string | null;
+  email_verified?: boolean | null;
+  [key: string]: unknown;
+}

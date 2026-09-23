@@ -12,8 +12,8 @@ chat-based signing workflows on top of it.
 
 This document is written to be read straight through. It starts with what the
 package contains, installs and configures it, makes a first request, explains
-how responses and errors behave, then walks the complete document-signing
-lifecycle before moving on to the chat, card, and AI layers. Each section
+how responses and errors behave, covers both ways of authenticating, then walks the complete
+document-signing lifecycle before moving on to the chat, card, and AI layers. Each section
 assumes the one before it.
 
 ---
@@ -22,8 +22,8 @@ assumes the one before it.
 
 The SDK is one package with two halves that can be used independently.
 
-**The API client** covers the Assinafy v1 REST API: **89 operations across 67
-paths**, grouped into eleven resources — accounts, authentication, users,
+**The API client** covers the Assinafy v1 REST API: **93 operations across 71
+paths**, grouped into twelve resources — accounts, authentication, OAuth, users,
 signers, documents, tags, templates, assignments, fields, the signer-facing
 signature flow, and webhooks. Every operation is typed, and the transport
 handles authentication, the response envelope, pagination, rate-limit metadata,
@@ -41,7 +41,7 @@ Two reference documents accompany this one and go deeper than it does:
 - **[API reference](./docs/API_REFERENCE.md)** — every public method with its
   authentication mode, complete request and response payloads, the chat, card,
   adapter, and state surfaces, and the full AI tool catalog.
-- **[API operation index](./docs/API_COVERAGE.md)** — all 89 published
+- **[API operation index](./docs/API_COVERAGE.md)** — all 93 published
   operations mapped to their SDK method, plus the places where the SDK's HTTP
   surface goes beyond the published document.
 
@@ -100,8 +100,12 @@ npm install @assinafy/chat-sdk
 ## 4. Configuration and authentication
 
 The client authenticates with either a long-lived API key sent as `X-Api-Key`,
-or a bearer access token obtained from `auth.login()`. The two are mutually
-exclusive; passing both throws `ConfigurationError`.
+or a bearer access token — one obtained from `auth.login()`, or an OAuth access
+token. The two are mutually exclusive; passing both throws
+`ConfigurationError`.
+
+An API key acts on **your own** workspace. If instead your product is connected
+by other people to *their* workspaces, use OAuth — that is the next section.
 
 ```ts
 import { AssinafyClient } from "@assinafy/chat-sdk/client";
@@ -135,7 +139,154 @@ rotate any key that is exposed.
 
 ---
 
-## 5. A first request
+## 5. Connecting other people's workspaces with OAuth
+
+Section 4 covers automating **your own** workspace. When your product is
+installed by *other people* into *their* Assinafy workspaces, they should never
+hand you an API key: use OAuth instead, and they approve a specific set of
+permissions that they can withdraw at any time.
+
+| | API key | OAuth |
+| --- | --- | --- |
+| Acts on | Your own workspace | Someone else's, with their permission |
+| Can do | Everything your account can | Only the scopes they approved |
+| They can switch it off | No | Yes, at any time |
+| Choose it when | You automate your own account | Others connect your product to theirs |
+
+Register the application under **Settings → OAuth applications**. You get a
+`client_id`, and — for a *confidential* application, one whose code runs on a
+server you control — a `client_secret` shown exactly once. A *public*
+application (mobile, single-page) gets no secret and authenticates with PKCE
+alone. Redirect URIs must be `https://` and are matched character for
+character.
+
+Two hosts are involved on purpose: the consent screen is on
+`auth.assinafy.com.br` and only ever receives a browser, while the token,
+revocation, and userinfo endpoints are on `api.assinafy.com.br` and are only
+ever called server to server. Both are discovered, so nothing is hardcoded.
+
+### The round trip
+
+```ts
+import { AssinafyClient, OAuthError } from "@assinafy/chat-sdk/client";
+
+// No credentials needed — the OAuth endpoints authenticate the application.
+const client = new AssinafyClient();
+
+// 1. Before redirecting: mint PKCE + state and build the consent URL.
+const request = await client.oauth.createAuthorizationUrl({
+  clientId: process.env.ASSINAFY_CLIENT_ID!,
+  redirectUri: "https://myapp.example/oauth/callback",
+  scopes: ["documents:read", "documents:write", "offline_access"],
+});
+session.oauth = request;          // keep the whole object; you need codeVerifier
+response.redirect(request.url);   // a full page load, not fetch()
+```
+
+```ts
+// 2. On https://myapp.example/oauth/callback — checks state and iss for you,
+//    and raises a declined consent as OAuthError("access_denied").
+const { code } = client.oauth.readAuthorizationCallback(query, session.oauth);
+
+// 3. Exchange the code. It is single-use and expires 60 seconds after the
+//    redirect, so do this immediately.
+const tokens = await client.oauth.exchangeCode({
+  code,
+  codeVerifier: session.oauth.codeVerifier,
+  redirectUri: "https://myapp.example/oauth/callback",
+  clientId: process.env.ASSINAFY_CLIENT_ID!,
+  clientSecret: process.env.ASSINAFY_CLIENT_SECRET, // omit for a public app
+});
+
+// 4. The token covers exactly one workspace. Ask which, and store its id.
+const connected = new AssinafyClient({ accessToken: tokens.access_token });
+const [account] = await connected.accounts.list();
+```
+
+From here `connected` is an ordinary client: every resource in this README
+works the same way, limited to the scopes the user approved.
+
+### Staying connected, and disconnecting
+
+```ts
+const renewed = await client.oauth.refreshToken({
+  refreshToken: stored.refresh_token!,
+  clientId: process.env.ASSINAFY_CLIENT_ID!,
+  clientSecret: process.env.ASSINAFY_CLIENT_SECRET,
+});
+await save(renewed.refresh_token);   // before anything else uses the response
+
+await client.oauth.revokeToken({
+  token: stored.refresh_token!,
+  tokenTypeHint: "refresh_token",
+  clientId: process.env.ASSINAFY_CLIENT_ID!,
+  clientSecret: process.env.ASSINAFY_CLIENT_SECRET,
+});
+```
+
+Four rules decide whether an OAuth integration is reliable:
+
+- **One connection is one workspace.** Any other workspace answers `403`, even
+  one the same user belongs to. A customer with several workspaces connects
+  each separately.
+- **Access tokens last an hour; refresh tokens rotate.** Every refresh returns
+  a new refresh token and retires the old one. A replayed refresh token cannot
+  be told apart from a stolen one, so the server ends the whole connection.
+  Persist the new token *before* doing anything else with the response, treat a
+  timeout as "it may have worked" and re-read your stored token, and never run
+  two refreshes at once for one connection.
+- **A connection expires 30 days after approval**, however often it is
+  refreshed. Plan for the user to reconnect.
+- **Ask for the minimum.** The user approves everything you requested or
+  nothing; `offline_access` is what buys a refresh token, and `openid` an
+  `id_token`. Read the `scope` in the response rather than assuming.
+
+### Scopes
+
+| Scope | Grants |
+| --- | --- |
+| `documents:read` | Read documents, signers, and signing status |
+| `documents:write` | Create documents and send them for signature — spends notification credits |
+| `templates:read` / `templates:write` | Read / manage templates |
+| `account:read` | Read the workspace's name and settings |
+| `webhooks:write` | Configure and deactivate the workspace webhook subscription |
+| `openid`, `profile`, `email` | Identify the user; `oauth.getUserInfo()` returns the claims |
+| `offline_access` | Receive a refresh token |
+
+Billing, workspace membership, credentials, and platform administration are
+never available to an application, whatever the scope.
+
+### Errors
+
+`OAuthError` extends `ApiError` and adds `error`, `errorDescription`, and —
+for a missing permission — `scope`:
+
+```ts
+try {
+  await connected.documents.upload(accountId, file);
+} catch (error) {
+  if (error instanceof OAuthError && error.error === "insufficient_scope") {
+    // error.scope names the permission to reconnect with.
+  }
+}
+```
+
+`access_denied` means the user declined; `invalid_grant` means an expired,
+replayed, or mismatched code or refresh token, and requires a new
+authorization; `invalid_client` means the application credentials are wrong. An
+expired access token answers a plain `401` — refresh, and ask the user to
+reconnect if that fails.
+
+[`examples/oauth-connect.ts`](https://github.com/assinafy/chat-sdk/blob/main/examples/oauth-connect.ts)
+is the whole flow as a runnable `node:http` server.
+
+> **Availability.** OAuth is served by the production host. The sandbox host
+> does not expose it, so develop the OAuth half of an integration against
+> production with a dedicated test workspace.
+
+---
+
+## 6. A first request
 
 Every resource method takes the identifiers it needs as explicit arguments, so
 the client itself stays stateless:
@@ -173,7 +324,7 @@ consequences of how the transport works, which is the next section.
 
 ---
 
-## 6. How responses, pagination, downloads, and errors behave
+## 7. How responses, pagination, downloads, and errors behave
 
 Understanding these four behaviors makes the rest of the SDK predictable,
 because every resource method inherits them.
@@ -241,6 +392,7 @@ are redacted before the error is constructed.
 | `AssinafyError` | Base class for every error the SDK defines |
 | `ConfigurationError` | Invalid base URL, credential combination, transport setting, or request argument |
 | `ApiError` | Any non-2xx API response |
+| `OAuthError` | An `ApiError` whose response carried an OAuth error code — adds `error`, `errorDescription`, and `scope` |
 | `NotImplementedError` | An adapter was asked for an operation its platform does not support |
 | `WebhookSignatureError` | A webhook signature failed verification or fell outside the replay window |
 
@@ -257,7 +409,7 @@ successful request into a failed one.
 
 ---
 
-## 7. The document-signing lifecycle
+## 8. The document-signing lifecycle
 
 With the transport understood, here is the workflow the API is built around. A
 document normally moves through these stages:
@@ -517,7 +669,7 @@ notification channels rather than handling the codes yourself.
 
 ---
 
-## 8. Building a chat workflow
+## 9. Building a chat workflow
 
 The chat layer wraps the same client in a conversational shape. Four pieces fit
 together:
@@ -632,7 +784,7 @@ name cannot become script execution.
 
 ---
 
-## 9. Driving the API from an LLM
+## 10. Driving the API from an LLM
 
 `createChatTools(client)` returns 36 provider-neutral tool descriptors — the
 read and write operations a conversational assistant realistically needs.
@@ -665,7 +817,7 @@ Node's built-in `fetch`.
 
 ---
 
-## 10. Examples
+## 11. Examples
 
 The examples import the repository source directly and are type-checked in CI
 by `tsconfig.examples.json`:
@@ -677,6 +829,9 @@ by `tsconfig.examples.json`:
   before starting.
 - [`examples/ai-bot.ts`](https://github.com/assinafy/chat-sdk/blob/main/examples/ai-bot.ts)
   — the Anthropic tool-call loop described above.
+- [`examples/oauth-connect.ts`](https://github.com/assinafy/chat-sdk/blob/main/examples/oauth-connect.ts)
+  — the full OAuth round trip on `node:http`: consent, callback, exchange, an
+  authenticated call, refresh, and revocation.
 
 Run one with the repository's development dependencies installed:
 
@@ -689,10 +844,13 @@ npx tsx examples/live-cli.ts
 
 `examples/ai-bot.ts` additionally reads `ANTHROPIC_API_KEY`, and optionally
 `ANTHROPIC_MODEL` to override its `claude-sonnet-5` default.
+`examples/oauth-connect.ts` reads `ASSINAFY_CLIENT_ID`, `ASSINAFY_REDIRECT_URI`,
+and optionally `ASSINAFY_CLIENT_SECRET`, and needs an https tunnel because
+`http://localhost` cannot be registered as a redirect URI.
 
 ---
 
-## 11. Development and verification
+## 12. Development and verification
 
 One command runs everything CI runs — type-checking of the source, tests, and
 examples; linting; unit tests with coverage thresholds; the build; and a smoke
@@ -703,8 +861,10 @@ checks their exports agree:
 npm run verify
 ```
 
-The live suite is separate because it needs credentials and talks to the
-sandbox:
+The live suite is separate because it talks to the network. It has two halves:
+the sandbox suite, which needs credentials and skips itself without them, and a
+credential-free contract suite that reads the production OpenAPI document and
+the public OAuth discovery endpoints.
 
 ```bash
 npm run test:integration
@@ -728,12 +888,9 @@ happy path. Enabling them also requires `ASSINAFY_TEST_EMAIL_PRIMARY` and
 
 Unit tests and example type-checking need no network access and no credentials.
 
-CI runs the unit job on every push and pull request. The credentialed
-integration job runs only for trusted `main` pushes and manual dispatches from
-`main`, so a pull request from a fork can never reach the sandbox secrets.
-Release tags additionally re-run the full verification and the live suite before
-publishing to npm with OIDC provenance and to GitHub Packages, from an artifact
-built once and verified before either publish.
+CI runs type checks, lint, unit tests, and packaging on every push and pull request.
+Release tags re-run verification and publish the same artifact to npm with OIDC
+provenance and to GitHub Packages.
 
 ---
 

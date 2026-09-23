@@ -3,7 +3,7 @@
 This is the reference for the public surface of `@assinafy/chat-sdk`.
 The REST contracts follow the official OpenAPI document at
 [`https://api.assinafy.com.br/v1/docs/openapi.json`](https://api.assinafy.com.br/v1/docs/openapi.json)
-and the complete 89-operation REST inventory is in the
+and the complete 93-operation REST inventory is in the
 [API operation index](./API_COVERAGE.md).
 
 The client exposes the API operations plus pagination helpers, deprecated
@@ -189,6 +189,37 @@ created by `AssinafyClient`.
 | <a id="auth-reset-password"></a>`auth.resetPassword(input)` | `PUT /authentication/reset-password` | public | [`ResetPasswordInput`](#password-reset-requests) | [`EmailResult`](#email-result-response) |
 
 The documented social-login provider is `google`.
+
+### OAuth
+
+For applications that act inside **other people's** workspaces. Automating your
+own workspace needs none of this — keep using an API key.
+
+The token, revocation and userinfo endpoints answer with a flat JSON object
+rather than the API's `{ status, message, data }` envelope, so standard OAuth
+libraries work unchanged. A failure carries `{ error, error_description }` and
+reaches the caller as `OAuthError`, a subclass of `ApiError` that adds `error`,
+`errorDescription`, and — for an `insufficient_scope` challenge — `scope`.
+
+`createAuthorizationUrl` and `readAuthorizationCallback` add no HTTP operation
+of their own: the first builds the consent URL the browser is sent to, the
+second validates the redirect the browser comes back on.
+
+| SDK method | HTTP operation | Auth | Request | Unwrapped SDK response |
+| --- | --- | --- | --- | --- |
+| <a id="oauth-get-protected-resource-metadata"></a>`oauth.getProtectedResourceMetadata()` | `GET /.well-known/oauth-protected-resource` | public | path/query only | [`OAuthProtectedResourceMetadata`](#protected-resource-metadata-response) |
+| <a id="oauth-get-authorization-server-metadata"></a>`oauth.getAuthorizationServerMetadata(issuer?)` | `GET {issuer}/.well-known/oauth-authorization-server` | public | path/query only | [`OAuthAuthorizationServerMetadata`](#authorization-server-metadata-response) |
+| <a id="oauth-create-authorization-url"></a>`oauth.createAuthorizationUrl(options)` | builds `GET {authorization_endpoint}` | public | [`CreateAuthorizationUrlOptions`](#authorization-url-options) | [`OAuthAuthorizationRequest`](#authorization-request-result) |
+| <a id="oauth-read-authorization-callback"></a>`oauth.readAuthorizationCallback(params, expected)` | validates your own redirect | public | [`AuthorizationCallbackParams`](#authorization-callback-parameters) | [`OAuthAuthorizationCallback`](#authorization-callback-result) |
+| <a id="oauth-exchange-code"></a>`oauth.exchangeCode(options)` | `POST /oauth/token` | public | [`authorization_code` body](#token-exchange-request) | [`OAuthTokenResponse`](#token-response) |
+| <a id="oauth-refresh-token"></a>`oauth.refreshToken(options)` | `POST /oauth/token` | public | [`refresh_token` body](#token-refresh-request) | [`OAuthTokenResponse`](#token-response) |
+| <a id="oauth-revoke-token"></a>`oauth.revokeToken(options)` | `POST /oauth/revoke` | public | [revocation body](#token-revocation-request) | [`void`](#unwrapped-json-pagination-raw-responses-and-void) |
+| <a id="oauth-get-user-info"></a>`oauth.getUserInfo(accessToken?)` | `GET /oauth/userinfo` | bearer | path/query only | [`OAuthUserInfo`](#userinfo-response) |
+
+An access token belongs to exactly one workspace and lives one hour; the
+connection behind it expires 30 days after the user approved it, however often
+it is refreshed. Refresh tokens rotate on every use, and replaying a retired one
+ends the connection.
 
 ### Users
 
@@ -626,6 +657,268 @@ contains the complete map:
   "SignerWhatsappFailed": true
 }
 ```
+
+### OAuth payloads
+
+#### Protected-resource metadata response
+
+```json
+{
+  "resource": "https://api.assinafy.com.br",
+  "authorization_servers": ["https://auth.assinafy.com.br"],
+  "scopes_supported": [
+    "documents:read",
+    "documents:write",
+    "templates:read",
+    "templates:write",
+    "account:read",
+    "webhooks:write",
+    "openid",
+    "profile",
+    "email"
+  ],
+  "bearer_methods_supported": ["header"]
+}
+```
+
+`offline_access` is deliberately absent here: it asks the authorization server
+for a refresh token rather than naming a permission this API enforces. The
+authorization endpoint still accepts it.
+
+#### Authorization-server metadata response
+
+Served by the authorization host, not by this API, and therefore outside the
+OpenAPI document.
+
+```json
+{
+  "issuer": "https://auth.assinafy.com.br",
+  "authorization_endpoint": "https://auth.assinafy.com.br/oauth/authorize",
+  "token_endpoint": "https://api.assinafy.com.br/v1/oauth/token",
+  "revocation_endpoint": "https://api.assinafy.com.br/v1/oauth/revoke",
+  "userinfo_endpoint": "https://api.assinafy.com.br/v1/oauth/userinfo",
+  "jwks_uri": "https://auth.assinafy.com.br/.well-known/jwks.json",
+  "scopes_supported": [
+    "documents:read",
+    "documents:write",
+    "templates:read",
+    "templates:write",
+    "account:read",
+    "webhooks:write",
+    "openid",
+    "profile",
+    "email",
+    "offline_access"
+  ],
+  "response_types_supported": ["code"],
+  "grant_types_supported": ["authorization_code", "refresh_token"],
+  "code_challenge_methods_supported": ["S256"],
+  "token_endpoint_auth_methods_supported": ["client_secret_post", "none"],
+  "authorization_response_iss_parameter_supported": true
+}
+```
+
+#### Scopes
+
+| Scope | Grants |
+| --- | --- |
+| `documents:read` | Read documents, signers, and signing status |
+| `documents:write` | Create documents and send them for signature. Spends the workspace's notification credits |
+| `templates:read` | Read templates |
+| `templates:write` | Create and change templates |
+| `account:read` | Read the workspace's name and settings |
+| `webhooks:write` | Configure and deactivate the workspace webhook subscription |
+| `openid` | Receive an `id_token` identifying the user |
+| `profile` | Read the user's name |
+| `email` | Read the user's email address |
+| `offline_access` | Receive a refresh token |
+
+Billing, workspace membership, credentials, and platform administration are
+never available to an application, whatever the scope.
+
+#### Authorization URL options
+
+Arguments to `oauth.createAuthorizationUrl`. Only the first three are required;
+the endpoint and issuer are discovered when omitted.
+
+```json
+{
+  "clientId": "01jd6m9x4k2p8v3r",
+  "redirectUri": "https://myapp.example/oauth/callback",
+  "scopes": ["documents:read", "documents:write", "offline_access"],
+  "authorizationEndpoint": "https://auth.assinafy.com.br/oauth/authorize",
+  "issuer": "https://auth.assinafy.com.br",
+  "resource": "https://api.assinafy.com.br",
+  "nonce": true,
+  "prompt": "consent"
+}
+```
+
+`redirectUri` must be `https://`, carry no fragment, and match a registered URI
+character for character — `…/callback` and `…/callback/` are different.
+
+#### Authorization request result
+
+Store the whole object in the user's session: the callback is checked against
+`state` and `issuer`, and the token exchange needs `codeVerifier`.
+
+```json
+{
+  "url": "https://auth.assinafy.com.br/oauth/authorize?client_id=01jd6m9x4k2p8v3r&redirect_uri=https%3A%2F%2Fmyapp.example%2Foauth%2Fcallback&response_type=code&scope=documents%3Aread+offline_access&state=Ic1n7eJgQ2mQ2g6o4rKnNw&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256&resource=https%3A%2F%2Fapi.assinafy.com.br",
+  "state": "Ic1n7eJgQ2mQ2g6o4rKnNw",
+  "codeVerifier": "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+  "codeChallenge": "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+  "issuer": "https://auth.assinafy.com.br",
+  "redirectUri": "https://myapp.example/oauth/callback",
+  "scope": "documents:read offline_access"
+}
+```
+
+A fresh `codeVerifier` and `state` are minted per call. Reusing either across
+attempts defeats PKCE and CSRF protection.
+
+#### Authorization callback parameters
+
+`oauth.readAuthorizationCallback` accepts the query in whatever shape the web
+framework produces: a full callback URL, a `URL`, a `URLSearchParams`, a bare
+`code=…&state=…` string, or a plain object such as Express's `request.query`.
+
+```json
+{
+  "code": "def5020089a1",
+  "state": "Ic1n7eJgQ2mQ2g6o4rKnNw",
+  "iss": "https://auth.assinafy.com.br"
+}
+```
+
+A declined or failed consent arrives instead as:
+
+```json
+{
+  "error": "access_denied",
+  "error_description": "The user declined the request",
+  "state": "Ic1n7eJgQ2mQ2g6o4rKnNw"
+}
+```
+
+#### Authorization callback result
+
+```json
+{
+  "code": "def5020089a1",
+  "state": "Ic1n7eJgQ2mQ2g6o4rKnNw",
+  "issuer": "https://auth.assinafy.com.br"
+}
+```
+
+`state` and `iss` have already been checked against the stored request. Anything
+that fails — a declined consent, a `state` from another session, a mismatched
+issuer, a missing code — raises `OAuthError` with the reason in `error`.
+
+#### Token exchange request
+
+Sent as JSON, without any workspace credential. The code is single-use and
+expires 60 seconds after the redirect.
+
+```json
+{
+  "grant_type": "authorization_code",
+  "code": "def5020089a1",
+  "redirect_uri": "https://myapp.example/oauth/callback",
+  "code_verifier": "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+  "client_id": "01jd6m9x4k2p8v3r",
+  "client_secret": "the-application-secret",
+  "resource": "https://api.assinafy.com.br"
+}
+```
+
+Public applications send the same body without `client_secret`; they
+authenticate with PKCE alone and are never issued one.
+
+#### Token refresh request
+
+```json
+{
+  "grant_type": "refresh_token",
+  "refresh_token": "def50200f1e2",
+  "client_id": "01jd6m9x4k2p8v3r",
+  "client_secret": "the-application-secret",
+  "resource": "https://api.assinafy.com.br"
+}
+```
+
+#### Token response
+
+Both grants return the same shape, flat rather than enveloped.
+
+```json
+{
+  "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "scope": "documents:read documents:write",
+  "refresh_token": "def50200a7c4",
+  "id_token": "eyJraWQiOiIyIiwiYWxnIjoiUlMyNTYifQ"
+}
+```
+
+`refresh_token` is present only when `offline_access` was granted, `id_token`
+only with `openid`. Read `scope` rather than assuming the request was granted in
+full. Persist a returned `refresh_token` **before** doing anything else with the
+response: the previous one is already retired, and replaying it ends the
+connection for the user.
+
+#### Token revocation request
+
+```json
+{
+  "token": "def50200f1e2",
+  "token_type_hint": "refresh_token",
+  "client_id": "01jd6m9x4k2p8v3r",
+  "client_secret": "the-application-secret"
+}
+```
+
+Every token outcome answers `200` — revoked, already revoked, unknown, or
+malformed alike — so the endpoint cannot be used to probe whether a token
+exists. Only failed client authentication is reported, as `invalid_client`.
+
+#### Userinfo response
+
+```json
+{
+  "sub": "d6zqpbyog2v3xvxerwn8la94",
+  "name": "Aline Costa",
+  "email": "owner@example.test",
+  "email_verified": true
+}
+```
+
+`name` requires the `profile` scope and `email` requires `email`; both are
+`null` without them.
+
+#### OAuth error response
+
+```json
+{
+  "error": "invalid_grant",
+  "error_description": "The authorization code has expired"
+}
+```
+
+| `error` | Raised when | Recovery |
+| --- | --- | --- |
+| `access_denied` | The user declined on the consent screen | Offer to try again |
+| `invalid_grant` | Code expired, replayed, or verifier/redirect mismatch; refresh token already used or expired | Start a new authorization |
+| `invalid_client` | Unknown `client_id`, wrong secret, or a disabled application | Fix the application credentials |
+| `invalid_scope` | A permission the application is not registered for | Fix `scopes` or the registration |
+| `invalid_target` | `resource` disagrees with the authorized value | Send the same `resource` throughout |
+| `insufficient_scope` | The token lacks a permission; `OAuthError.scope` names it | Reconnect asking for that scope |
+
+An expired or revoked access token answers `401` with a `WWW-Authenticate:
+Bearer` challenge that carries no `error` parameter. That stays an ordinary
+`ApiError`; branch on `status === 401` and read `wwwAuthenticate` when you need
+the challenge itself.
 
 ### Signer payloads
 

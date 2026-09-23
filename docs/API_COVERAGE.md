@@ -1,6 +1,6 @@
 # Assinafy v1 API operation index
 
-This index lists the 89 Assinafy v1 operations, their SDK methods, request and
+This index lists the 93 Assinafy v1 operations, their SDK methods, request and
 response documentation, and authentication mode. Paths include the `/v1`
 prefix; SDK resource methods use a `baseUrl` that already contains it.
 
@@ -16,7 +16,11 @@ Authentication labels:
 
 - **Bearer / API key** — either `Authorization: Bearer …` or `X-Api-Key: …`.
 - **Signer access code** — the signer access code required by signer-facing operations.
-- **Public** — no API credential.
+- **Public** — no API credential. The OAuth token and revocation endpoints are
+  public in this sense: they authenticate the *application* with its
+  `client_id` (and, for confidential applications, `client_secret`) in the
+  request body, and the SDK deliberately withholds the workspace API key from
+  them.
 
 ## Operation counts
 
@@ -27,13 +31,14 @@ Authentication labels:
 | Authentication | 9 |
 | Documents | 18 |
 | Fields | 8 |
+| OAuth | 4 |
 | Signers | 5 |
 | Signing | 17 |
 | Tags | 4 |
 | Templates | 1 |
 | Users | 4 |
 | Webhooks | 6 |
-| **Total** | **89** |
+| **Total** | **93** |
 
 ## Operations
 
@@ -113,6 +118,22 @@ Authentication labels:
 | POST | `/v1/accounts/{accountId}/fields/{fieldId}/validate` | `client.fields.validate` | [Request](API_REFERENCE.md#fields-validate) | [Unwrapped response](API_REFERENCE.md#fields-validate) | Bearer / API key |
 | POST | `/v1/accounts/{accountId}/fields/validate-multiple` | `client.fields.validateMultiple` | [Request](API_REFERENCE.md#fields-validate-multiple) | [Unwrapped response](API_REFERENCE.md#fields-validate-multiple) | Bearer / API key |
 | GET | `/v1/field-types` | `client.fields.listTypes` | [Request](API_REFERENCE.md#fields-list-types) | [Unwrapped response](API_REFERENCE.md#fields-list-types) | Bearer / API key |
+
+### OAuth
+
+Used only by applications acting inside other people's workspaces. Responses
+here are flat JSON, not the `{ status, message, data }` envelope the rest of the
+API uses, so standard OAuth libraries work unchanged.
+
+| Method | Path | SDK method | Request | SDK response | Auth |
+| --- | --- | --- | --- | --- | --- |
+| GET | `/.well-known/oauth-protected-resource` | `client.oauth.getProtectedResourceMetadata` | [Request](API_REFERENCE.md#oauth-get-protected-resource-metadata) | [Flat response](API_REFERENCE.md#protected-resource-metadata-response) | Public |
+| POST | `/v1/oauth/token` | `client.oauth.exchangeCode`, `client.oauth.refreshToken` | [Request](API_REFERENCE.md#token-exchange-request) | [Flat response](API_REFERENCE.md#token-response) | Public |
+| POST | `/v1/oauth/revoke` | `client.oauth.revokeToken` | [Request](API_REFERENCE.md#token-revocation-request) | [Unwrapped response](API_REFERENCE.md#oauth-revoke-token) | Public |
+| GET | `/v1/oauth/userinfo` | `client.oauth.getUserInfo` | [Request](API_REFERENCE.md#oauth-get-user-info) | [Flat response](API_REFERENCE.md#userinfo-response) | Bearer |
+
+The path of the protected-resource document has no `/v1` prefix: RFC 8615 places
+it at the host root. The SDK derives that origin from the configured `baseUrl`.
 
 ### Signers
 
@@ -213,6 +234,8 @@ supplies it, so the documented behavior is unchanged when they are left unset.
 
 These helpers add no HTTP operation of their own:
 
+- `client.oauth.createAuthorizationUrl` mints the PKCE pair and `state` and builds the consent URL on the authorization host; `client.oauth.readAuthorizationCallback` validates the redirect it comes back on. Neither issues a request to this API.
+- `client.oauth.getAuthorizationServerMetadata` reads `GET {issuer}/.well-known/oauth-authorization-server` on the authorization host, which is a different host from this API and outside its OpenAPI document.
 - `client.documents.iterate` and `client.signers.iterate` page through their corresponding list operations.
 - `client.auth.listApiKeys` adapts the single-key response to an array; `client.auth.revokeApiKeys` aliases `deleteApiKey`.
 - `client.assignments.sign` and `client.assignments.decline` are alternate facades for the corresponding signing operations.
