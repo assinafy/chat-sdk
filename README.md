@@ -402,7 +402,7 @@ que apareçam no caminho são redigidos antes de o erro ser construído.
 | Classe de erro | Quando é lançada |
 | --- | --- |
 | `AssinafyError` | Classe base de todo erro que o SDK define |
-| `ConfigurationError` | Base URL, combinação de credenciais, configuração de transporte ou argumento de requisição inválido |
+| `ConfigurationError` | Base URL, combinação de credenciais, configuração de transporte, argumento de requisição ou adaptador de chat inválido |
 | `ApiError` | Qualquer resposta não-2xx da API |
 | `OAuthError` | Um `ApiError` cuja resposta trouxe um código de erro OAuth — acrescenta `error`, `errorDescription` e `scope` |
 | `NotImplementedError` | Um adapter recebeu uma operação que sua plataforma não suporta |

@@ -28,6 +28,7 @@
 
 import type { ChatAdapter, ChatHandle, IncomingAction, IncomingMessage } from "./adapters/base.js";
 import type { AssinafyClient } from "./client/index.js";
+import { ConfigurationError } from "./client/errors.js";
 import type { ChatState } from "./state/base.js";
 import { MemoryStateAdapter } from "./state/memory.js";
 import { Thread, type PostInput } from "./thread.js";
@@ -86,7 +87,7 @@ export class Chat implements ChatHandle {
   constructor(options: ChatOptions) {
     const adapterNames = Object.keys(options.adapters);
     if (adapterNames.length === 0) {
-      throw new Error("Chat requires at least one adapter");
+      throw new ConfigurationError("Chat requires at least one adapter");
     }
     this.userName = options.userName;
     this.adapters = Object.freeze({ ...options.adapters });
@@ -94,7 +95,7 @@ export class Chat implements ChatHandle {
     this.client = options.client;
     this.defaultAdapter = options.defaultAdapter ?? adapterNames[0]!;
     if (!Object.hasOwn(this.adapters, this.defaultAdapter)) {
-      throw new Error(`Chat: no adapter registered under name "${this.defaultAdapter}"`);
+      throw new ConfigurationError(`Chat: no adapter registered under name "${this.defaultAdapter}"`);
     }
     // Kick off adapter initialization. The promise is awaited by every dispatch
     // entry point (and exposed via `whenReady()`) so init errors surface rather
@@ -275,7 +276,7 @@ export class Chat implements ChatHandle {
 
   private requireAdapter(name: string): ChatAdapter {
     if (!Object.hasOwn(this.adapters, name)) {
-      throw new Error(`Chat: no adapter registered under name "${name}"`);
+      throw new ConfigurationError(`Chat: no adapter registered under name "${name}"`);
     }
     return this.adapters[name]!;
   }

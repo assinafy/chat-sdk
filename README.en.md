@@ -390,7 +390,7 @@ are redacted before the error is constructed.
 | Error class | When it is thrown |
 | --- | --- |
 | `AssinafyError` | Base class for every error the SDK defines |
-| `ConfigurationError` | Invalid base URL, credential combination, transport setting, or request argument |
+| `ConfigurationError` | Invalid base URL, credential combination, transport setting, request argument, or chat adapter |
 | `ApiError` | Any non-2xx API response |
 | `OAuthError` | An `ApiError` whose response carried an OAuth error code — adds `error`, `errorDescription`, and `scope` |
 | `NotImplementedError` | An adapter was asked for an operation its platform does not support |

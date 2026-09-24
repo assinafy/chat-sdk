@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { Chat } from "../../src/chat.js";
+import { ConfigurationError } from "../../src/client/errors.js";
 import { createMemoryAdapter, type MemoryAdapter } from "../../src/adapters/index.js";
 import { MemoryStateAdapter } from "../../src/state/memory.js";
 import { Card, Text } from "../../src/cards/index.js";
@@ -87,9 +88,7 @@ describe("Chat", () => {
   });
 
   it("rejects a Chat with no adapters", () => {
-    expect(() => new Chat({ userName: "ready-bot", adapters: {} })).toThrow(
-      "Chat requires at least one adapter",
-    );
+    expect(() => new Chat({ userName: "ready-bot", adapters: {} })).toThrow(ConfigurationError);
   });
 
   it("post() sends to a thread without materializing a Thread first", async () => {
