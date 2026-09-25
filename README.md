@@ -57,7 +57,8 @@ O contrato upstream com autoridade é a
 
 Aplicações de servidor e os exemplos deste repositório têm como alvo o
 **Node.js 24 LTS**, que é o que o campo `engines` do pacote exige e o que a CI
-roda.
+roda. A API só aceita HTTPS com TLS 1.2 ou superior, o padrão de todos os
+runtimes listados abaixo.
 
 Nem todo ponto de entrada precisa de Node. O pacote publica subcaminhos
 focados, para que um bundle de browser ou edge possa trazer apenas o cliente
@@ -187,7 +188,7 @@ const request = await client.oauth.createAuthorizationUrl({
   redirectUri: "https://meuapp.example/oauth/callback",
   scopes: ["documents:read", "documents:write", "offline_access"],
 });
-session.oauth = request;          // guarde o objeto inteiro: o codeVerifier é necessário depois
+session.oauth = request;          // guarde o objeto inteiro: state, issuer, codeVerifier
 response.redirect(request.url);   // navegação de página inteira, não fetch()
 ```
 
@@ -217,22 +218,28 @@ funciona igual, limitado aos escopos que a pessoa aprovou.
 ### Mantendo a conexão e desconectando
 
 ```ts
+// Renove antes de completar uma hora (exige offline_access).
 const renovado = await client.oauth.refreshToken({
   refreshToken: armazenado.refresh_token!,
   clientId: process.env.ASSINAFY_CLIENT_ID!,
   clientSecret: process.env.ASSINAFY_CLIENT_SECRET,
 });
-await salvar(renovado.refresh_token);   // antes de qualquer outro uso da resposta
+await salvar(renovado);                 // antes de qualquer outro uso da resposta
+// O token de acesso também mudou: monte o cliente com o novo.
+const conectado = new AssinafyClient({ accessToken: renovado.access_token });
 
+// Quando a pessoa desconectar: revogue o refresh token salvo mais recentemente,
+// nunca uma cópia lida antes do último refresh — essa já está aposentada.
+const atual = await carregar();
 await client.oauth.revokeToken({
-  token: armazenado.refresh_token!,
+  token: atual.refresh_token!,
   tokenTypeHint: "refresh_token",
   clientId: process.env.ASSINAFY_CLIENT_ID!,
   clientSecret: process.env.ASSINAFY_CLIENT_SECRET,
 });
 ```
 
-Quatro regras decidem se uma integração OAuth é confiável:
+Cinco regras decidem se uma integração OAuth é confiável:
 
 - **Uma conexão é uma conta.** Qualquer outra conta responde `403`, mesmo uma da
   qual a mesma pessoa participa. Um cliente com várias contas conecta cada uma
@@ -241,10 +248,21 @@ Quatro regras decidem se uma integração OAuth é confiável:
   devolve um novo refresh token e aposenta o anterior. Um refresh token
   reapresentado é indistinguível de um roubado, então o servidor encerra a
   conexão inteira. Persista o novo token **antes** de qualquer outro uso da
-  resposta, trate um timeout como "pode ter funcionado" e releia o token
-  armazenado, e nunca rode dois refreshes ao mesmo tempo para uma conexão.
-- **A conexão expira 30 dias após a aprovação**, por mais que seja renovada.
-  Planeje a reconexão.
+  resposta, e nunca rode dois refreshes ao mesmo tempo para uma conexão, nem
+  um enquanto uma desconexão a revoga.
+- **Envie cada refresh token uma única vez.** Um timeout, uma conexão caída ou
+  um `5xx` podem chegar depois que o servidor já rotacionou o token, então
+  trate-os como "pode ter funcionado": releia o token armazenado e, se ainda
+  for o enviado, nunca o envie de novo — marque a conexão como inutilizável e
+  peça a reconexão. Só um token mais novo no seu armazenamento é seguro. A
+  única falha que pode ser repetida com o mesmo token é a que comprovadamente
+  ocorreu antes do envio: um `ConfigurationError`, uma falha de DNS, uma
+  conexão recusada ou um erro no handshake TLS. `refreshToken` nunca repete a
+  requisição por conta própria, e um sucesso sem um novo refresh token gera
+  `OAuthError` `invalid_grant`.
+- **Um refresh token vale 30 dias, e cada refresh devolve um novo com mais 30
+  dias.** A conexão só expira se a sua aplicação passar 30 dias sem renovar;
+  depois disso, a pessoa precisa conectar de novo.
 - **Peça o mínimo.** A pessoa aprova tudo o que você pediu ou nada;
   `offline_access` é o que dá o refresh token, e `openid` o `id_token`. Leia o
   `scope` da resposta em vez de assumir.
@@ -291,6 +309,14 @@ traz o fluxo inteiro como um servidor `node:http` executável.
 > **Disponibilidade.** O OAuth é servido pelo host de produção. O sandbox não o
 > expõe, então desenvolva a parte OAuth da integração contra produção, usando
 > uma conta de teste dedicada.
+
+> **Migrando para a 2.3.0.** `readAuthorizationCallback` recusa um callback sem
+> `iss`, inclusive os retornos com `?error=`, com `OAuthError`
+> `invalid_request`; quando o objeto passado não tem `issuer`, o `iss` precisa
+> ser `https://auth.assinafy.com.br`. Guarde a requisição inteira devolvida por
+> `createAuthorizationUrl` — não só o `state` — e passe-a de volta.
+> `refreshToken` gera `OAuthError` `invalid_grant` para um sucesso sem um novo
+> refresh token; peça a reconexão.
 
 ---
 

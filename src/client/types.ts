@@ -447,6 +447,11 @@ export interface PublicDocument {
 export interface DocumentVerificationResult {
   hash: string;
   id: string | null;
+  /**
+   * Agreement code printed on the document certificate; `null` when the hash
+   * matches no signed document. The sandbox does not return it yet.
+   */
+  agreement_code?: string | null;
   status: DocumentStatusCode | null;
   page_count: string | number | null;
   signer_count: string | number | null;
@@ -1036,7 +1041,7 @@ export interface OAuthAuthorizationCallback {
   /** The `state` that was echoed back, already checked against the request. */
   state: string;
   /** The `iss` that was echoed back, already checked against the request. */
-  issuer?: string;
+  issuer: string;
 }
 
 /** RFC 6749 §5.1 token response. Never wrapped in the API's usual envelope. */
@@ -1050,9 +1055,18 @@ export interface OAuthTokenResponse {
    * every refresh — persist the new value before using it.
    */
   refresh_token?: string | null;
-  /** Permissions the token actually carries. Read it instead of assuming. */
+  /**
+   * Permissions the token actually carries. Read it instead of assuming.
+   * `offline_access` never appears here, even when granted: whether you can
+   * refresh is decided by the presence of `refresh_token`.
+   */
   scope?: string;
-  /** Signed OIDC identity token (RS256). Present only with the `openid` scope. */
+  /**
+   * Signed OIDC identity token (RS256). Present only with the `openid` scope.
+   * Validate it with an OpenID Connect library before trusting it: key from
+   * `jwks_uri` matched by `kid`, `iss`, `aud` equal to your `client_id`, `exp`,
+   * and `nonce` when you sent one.
+   */
   id_token?: string | null;
   [key: string]: unknown;
 }

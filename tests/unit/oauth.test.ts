@@ -61,8 +61,11 @@ function clientWith(routes: Record<string, () => Response>, apiKey = "workspace-
   return { client: new AssinafyClient({ apiKey, baseUrl: API, fetch: fetchImpl }), calls };
 }
 
+/** The form fields of a token or revocation request, after checking its encoding. */
 async function bodyOf(calls: Array<{ init: RequestInit }>, index = calls.length - 1) {
-  return JSON.parse(String(calls[index]!.init.body)) as Record<string, unknown>;
+  const { body, headers } = calls[index]!.init;
+  expect(new Headers(headers).get("content-type")).toBe("application/x-www-form-urlencoded");
+  return Object.fromEntries(new URLSearchParams(String(body))) as Record<string, unknown>;
 }
 
 describe("OAuthResource discovery", () => {
@@ -219,23 +222,21 @@ describe("createAuthorizationUrl", () => {
 
 describe("readAuthorizationCallback", () => {
   const expected = { state: "s-1234567890", issuer: ISSUER };
+  const iss = `iss=${encodeURIComponent(ISSUER)}`;
 
   it("accepts a full callback URL", () => {
     const { client } = clientWith({});
     expect(
-      client.oauth.readAuthorizationCallback(
-        `${REDIRECT}?code=abc&state=s-1234567890&iss=${encodeURIComponent(ISSUER)}`,
-        expected,
-      ),
+      client.oauth.readAuthorizationCallback(`${REDIRECT}?code=abc&state=s-1234567890&${iss}`, expected),
     ).toEqual({ code: "abc", state: "s-1234567890", issuer: ISSUER });
   });
 
   it.each([
-    ["a bare query string", "code=abc&state=s-1234567890"],
-    ["URLSearchParams", new URLSearchParams("code=abc&state=s-1234567890")],
-    ["a URL object", new URL(`${REDIRECT}?code=abc&state=s-1234567890`)],
-    ["an Express query object", { code: "abc", state: "s-1234567890" }],
-    ["a repeated query key", { code: ["abc", "zzz"], state: "s-1234567890" }],
+    ["a bare query string", `code=abc&state=s-1234567890&${iss}`],
+    ["URLSearchParams", new URLSearchParams(`code=abc&state=s-1234567890&${iss}`)],
+    ["a URL object", new URL(`${REDIRECT}?code=abc&state=s-1234567890&${iss}`)],
+    ["an Express query object", { code: "abc", state: "s-1234567890", iss: ISSUER }],
+    ["a repeated query key", { code: ["abc", "zzz"], state: "s-1234567890", iss: ISSUER }],
   ])("accepts %s", (_label, params) => {
     const { client } = clientWith({});
     expect(client.oauth.readAuthorizationCallback(params, expected).code).toBe("abc");
@@ -245,7 +246,7 @@ describe("readAuthorizationCallback", () => {
     const { client } = clientWith({});
     try {
       client.oauth.readAuthorizationCallback(
-        "error=access_denied&error_description=User+declined&state=s-1234567890",
+        `error=access_denied&error_description=User+declined&state=s-1234567890&${iss}`,
         expected,
       );
       expect.unreachable();
@@ -256,13 +257,37 @@ describe("readAuthorizationCallback", () => {
   });
 
   it.each([
-    ["a mismatched state", "code=abc&state=someone-elses"],
-    ["a state of a different length", "code=abc&state=s-1"],
+    ["another session's state", `error=access_denied&state=someone-elses&${iss}`],
+    ["another issuer", "error=access_denied&state=s-1234567890&iss=https%3A%2F%2Fevil.example"],
+    ["no issuer", "error=access_denied&state=s-1234567890"],
+  ])("checks state and iss before reporting an error return from %s", (_label, query) => {
+    const { client } = clientWith({});
+    expect(() => client.oauth.readAuthorizationCallback(query, expected)).toThrow(
+      expect.objectContaining({ error: "invalid_request" }),
+    );
+  });
+
+  it.each([
+    ["a mismatched state", `code=abc&state=someone-elses&${iss}`],
+    ["a state of a different length", `code=abc&state=s-1&${iss}`],
     ["a mismatched issuer", "code=abc&state=s-1234567890&iss=https%3A%2F%2Fevil.example"],
-    ["a missing code", "state=s-1234567890"],
+    ["a missing issuer", "code=abc&state=s-1234567890"],
+    ["a missing code", `state=s-1234567890&${iss}`],
   ])("rejects %s", (_label, query) => {
     const { client } = clientWith({});
     expect(() => client.oauth.readAuthorizationCallback(query, expected)).toThrow(OAuthError);
+  });
+
+  it("expects Assinafy's issuer when the caller recorded none", () => {
+    const { client } = clientWith({});
+    const state = { state: "s-1234567890" };
+    expect(client.oauth.readAuthorizationCallback(`code=abc&state=s-1234567890&${iss}`, state).issuer).toBe(ISSUER);
+    expect(() =>
+      client.oauth.readAuthorizationCallback(
+        "code=abc&state=s-1234567890&iss=https%3A%2F%2Fevil.example",
+        state,
+      ),
+    ).toThrow(OAuthError);
   });
 
   it("requires the caller to supply the expected state", () => {
@@ -347,11 +372,49 @@ describe("token endpoint", () => {
     });
   });
 
+  it.each([
+    ["a 503", () => json({ error: "temporarily_unavailable" }, 503)],
+    ["a network failure", (): Response => {
+      throw new TypeError("fetch failed", { cause: { code: "ETIMEDOUT" } });
+    }],
+  ])("never retries the token endpoint after %s", async (_label, route) => {
+    // A refresh that may have succeeded must not be replayed with the old token.
+    const { client, calls } = clientWith({ "/v1/oauth/token": route });
+    await expect(client.oauth.refreshToken({ refreshToken: "rt", clientId: "app-1" })).rejects.toThrow();
+    expect(calls).toHaveLength(1);
+  });
+
   it("rejects a 2xx that carries no access token", async () => {
     const { client } = clientWith({ "/v1/oauth/token": () => json({ token_type: "Bearer" }) });
     await expect(
       client.oauth.refreshToken({ refreshToken: "rt", clientId: "app-1" }),
     ).rejects.toThrow(/no access_token/);
+  });
+
+  it.each([
+    ["no refresh_token", { ...TOKENS, refresh_token: undefined }],
+    ["a null refresh_token", { ...TOKENS, refresh_token: null }],
+    ["an empty refresh_token", { ...TOKENS, refresh_token: "" }],
+    ["the refresh_token it was sent", { ...TOKENS, refresh_token: "rt_live_sent" }],
+  ])("rejects a refresh 2xx carrying %s, without echoing a token", async (_label, answer) => {
+    // The token sent is already retired: returning this would leave nothing
+    // usable to persist, or a replay that ends the connection.
+    const { client } = clientWith({ "/v1/oauth/token": () => json(answer) });
+    const error = await client.oauth
+      .refreshToken({ refreshToken: "rt_live_sent", clientId: "app-1" })
+      .catch((caught: unknown) => caught as OAuthError);
+    expect(error).toBeInstanceOf(OAuthError);
+    expect(error).toMatchObject({ error: "invalid_grant", message: expect.stringMatching(/no new refresh_token/) });
+    const exposed = JSON.stringify({ ...error, message: error.message });
+    expect(exposed).not.toContain(TOKENS.access_token);
+    expect(exposed).not.toContain("rt_live_sent");
+  });
+
+  it("accepts an exchange without a refresh token, as without offline_access", async () => {
+    const { client } = clientWith({ "/v1/oauth/token": () => json({ access_token: "at", token_type: "Bearer" }) });
+    await expect(
+      client.oauth.exchangeCode({ code: "c", codeVerifier: verifier, redirectUri: REDIRECT, clientId: "a" }),
+    ).resolves.toEqual({ access_token: "at", token_type: "Bearer" });
   });
 
   it.each([

@@ -41,6 +41,9 @@ const AUTHORIZATION_SERVER_PATH = "/.well-known/oauth-authorization-server";
 /** RFC 7636 code-verifier grammar: 43–128 unreserved characters. */
 const CODE_VERIFIER_PATTERN = /^[A-Za-z0-9\-._~]{43,128}$/;
 
+/** Assinafy's authorization server: the `iss` a callback must carry unless told otherwise. */
+const DEFAULT_ISSUER = "https://auth.assinafy.com.br";
+
 const paths = {
   token: () => "/oauth/token",
   revoke: () => "/oauth/revoke",
@@ -98,7 +101,7 @@ export interface CreateAuthorizationUrlOptions {
 export interface ExpectedAuthorizationRequest {
   /** The `state` minted for this attempt. */
   state: string;
-  /** The issuer the callback's `iss` must equal, when the server sends one. */
+  /** The issuer the callback's `iss` must equal. Defaults to `https://auth.assinafy.com.br`. */
   issuer?: string;
 }
 
@@ -130,8 +133,9 @@ export type AuthorizationCallbackParams =
  *    and {@link revokeToken} when the user disconnects.
  *
  * Two facts cause most integration bugs: a token works for exactly one
- * workspace — any other answers `403` — and a connection expires 30 days after
- * approval however often it is refreshed.
+ * workspace — any other answers `403` — and refresh tokens rotate, so a
+ * retired one must never be sent again. A connection stays alive as long as it
+ * is refreshed at least once every 30 days.
  *
  * @example
  * ```ts
@@ -320,9 +324,11 @@ export class OAuthResource {
    * Validate a redirect callback and pull the authorization code out of it
    * (your own redirect URI — no request is made).
    *
-   * Runs the two checks the flow depends on before anything else touches the
-   * code: `state` must equal what {@link createAuthorizationUrl} minted, and
-   * `iss` must equal the issuer it recorded. A declined or failed consent
+   * Runs the two checks the flow depends on before anything else — before a
+   * declined consent is even reported: `state` must equal what
+   * {@link createAuthorizationUrl} minted, and `iss` must be present and equal
+   * the issuer it recorded (`https://auth.assinafy.com.br` when none is given).
+   * A callback that fails either is not yours. A declined or failed consent
    * arrives as `?error=…` and is raised rather than returned, so the happy path
    * stays a straight line.
    *
@@ -350,19 +356,21 @@ export class OAuthResource {
     requireNonEmpty(expected?.state, "expected.state");
     const query = toSearchParams(params);
 
-    const failure = query.get("error");
-    if (failure) {
-      throw callbackError(failure, query.get("error_description") ?? undefined);
-    }
-
+    // `state` and `iss` first, `?error=` returns included: a response that
+    // fails either did not come from the attempt this session started.
     const state = query.get("state") ?? "";
     if (!constantTimeEquals(state, expected.state)) {
       throw callbackError("invalid_request", "The callback state does not match this session");
     }
 
-    const issuer = query.get("iss") ?? undefined;
-    if (expected.issuer && issuer && trimSlash(issuer) !== trimSlash(expected.issuer)) {
+    const issuer = query.get("iss") ?? "";
+    if (!issuer || trimSlash(issuer) !== trimSlash(expected.issuer || DEFAULT_ISSUER)) {
       throw callbackError("invalid_request", "The callback issuer does not match this session");
+    }
+
+    const failure = query.get("error");
+    if (failure) {
+      throw callbackError(failure, query.get("error_description") ?? undefined);
     }
 
     const code = query.get("code") ?? "";
@@ -380,7 +388,8 @@ export class OAuthResource {
    * this as soon as the callback lands. `redirectUri` must repeat the value
    * sent to the authorization endpoint character for character.
    *
-   * Request body — JSON, sent without any workspace credential:
+   * Request body — sent form-encoded (`application/x-www-form-urlencoded`) and
+   * without any workspace credential; fields shown as JSON:
    * ```json
    * {
    *   "grant_type": "authorization_code",
@@ -443,12 +452,23 @@ export class OAuthResource {
    * you sent, and a replayed refresh token cannot be told apart from a stolen
    * one — so the server ends the entire connection and the user has to
    * reconnect. Therefore: persist `refresh_token` from the response before
-   * doing anything else with it, treat a timeout as "it may have succeeded" and
-   * re-read your stored token instead of retrying blindly, and never run two
-   * refreshes concurrently for one connection. Refreshing does not extend the
-   * connection's 30-day life.
+   * doing anything else with it, and never run two refreshes concurrently for
+   * one connection. This method never retries the request itself.
    *
-   * Request body:
+   * Send each refresh token at most once. A timeout, a dropped connection or a
+   * `5xx` may arrive after the server already rotated the token, so treat it as
+   * "it may have succeeded": re-read your stored token, and if it is still the
+   * one you sent, never send it again — mark the connection unusable and ask
+   * the user to reconnect. Only a newer token in your storage is safe to use.
+   * The one failure that may be retried with the same token is one that
+   * provably happened before sending: a {@link ConfigurationError}, a DNS
+   * failure, a refused connection, or a TLS handshake error.
+   *
+   * A refresh token is valid for 30 days and every refresh returns a new one
+   * with a fresh 30 days, so a connection only expires after 30 days without a
+   * refresh.
+   *
+   * Request body, form-encoded:
    * ```json
    * {
    *   "grant_type": "refresh_token",
@@ -472,18 +492,32 @@ export class OAuthResource {
    * ```
    * @throws {ConfigurationError} If an argument is missing or malformed.
    * @throws {OAuthError} `invalid_grant` when the refresh token was already
-   *   used, expired, or its authorization no longer includes `offline_access`.
+   *   used, expired, or its authorization no longer includes `offline_access`
+   *   — including after the user approved the application again with
+   *   different permissions — and when a `2xx` carries no new `refresh_token`
+   *   (missing, empty, or the one sent). The connection is gone: ask the user
+   *   to reconnect.
    */
   async refreshToken(
     options: OAuthClientAuth & { refreshToken: string; resource?: string | null },
   ): Promise<OAuthTokenResponse> {
     requireNonEmpty(options?.refreshToken, "refreshToken");
-    return this.requestToken({
+    const tokens = await this.requestToken({
       grant_type: "refresh_token",
       refresh_token: options.refreshToken,
       ...clientAuth(options),
       resource: this.resourceParam(options.resource),
     });
+    // The token sent is already retired: without a new one there is nothing
+    // to persist, and persisting the old one sets up a fatal replay.
+    const next = tokens.refresh_token;
+    if (typeof next !== "string" || !next.trim() || next === options.refreshToken) {
+      throw callbackError(
+        "invalid_grant",
+        "The token endpoint returned no new refresh_token; the connection must be re-established",
+      );
+    }
+    return tokens;
   }
 
   /**
@@ -492,7 +526,7 @@ export class OAuthResource {
    * Call it when a user disconnects in your product rather than only dropping
    * your copy of the token. Revoking a refresh token ends the connection.
    *
-   * Request body:
+   * Request body, form-encoded:
    * ```json
    * {
    *   "token": "def50200f1e2…",
@@ -517,11 +551,10 @@ export class OAuthResource {
     },
   ): Promise<void> {
     requireNonEmpty(options?.token, "token");
-    await this.anonymous.post<unknown>(paths.revoke(), {
-      token: options.token,
-      token_type_hint: options.tokenTypeHint,
-      ...clientAuth(options),
-    });
+    await this.anonymous.request<unknown>(
+      paths.revoke(),
+      formPost({ token: options.token, token_type_hint: options.tokenTypeHint, ...clientAuth(options) }),
+    );
   }
 
   /**
@@ -556,9 +589,13 @@ export class OAuthResource {
     return http.get<OAuthUserInfo>(paths.userinfo());
   }
 
-  /** POST the token endpoint and reject a `2xx` that carries no access token. */
-  private async requestToken(body: Record<string, unknown>): Promise<OAuthTokenResponse> {
-    const tokens = await this.anonymous.post<OAuthTokenResponse>(paths.token(), compact(body));
+  /**
+   * POST the token endpoint and reject a `2xx` that carries no access token.
+   * Never retried: the transport retries safe methods only, and a replayed
+   * code or refresh token is fatal.
+   */
+  private async requestToken(body: Record<string, string | undefined>): Promise<OAuthTokenResponse> {
+    const { data: tokens } = await this.anonymous.request<OAuthTokenResponse>(paths.token(), formPost(body));
     if (typeof tokens?.access_token !== "string" || !tokens.access_token) {
       throw callbackError("invalid_grant", "The token endpoint returned no access_token");
     }
@@ -599,9 +636,19 @@ function clientAuth(options: OAuthClientAuth): Record<string, string | undefined
   return { client_id: options.clientId, client_secret: options.clientSecret };
 }
 
-/** Drop keys the caller left undefined so they are not sent as `null`. */
-function compact(body: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(body).filter(([, value]) => value !== undefined));
+/**
+ * An `application/x-www-form-urlencoded` POST, the encoding RFC 6749 and
+ * RFC 7009 define for the token and revocation endpoints. Keys the caller left
+ * undefined are dropped rather than sent empty.
+ */
+function formPost(body: Record<string, string | undefined>): RequestInit {
+  const form = new URLSearchParams();
+  for (const [key, value] of Object.entries(body)) if (value !== undefined) form.set(key, value);
+  return {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: form,
+  };
 }
 
 /**

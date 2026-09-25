@@ -24,6 +24,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import {
   AssinafyClient,
   ApiError,
+  ConfigurationError,
   OAuthError,
   type OAuthAuthorizationRequest,
   type OAuthTokenResponse,
@@ -55,8 +56,14 @@ const pending = new Map<string, OAuthAuthorizationRequest>();
 /**
  * The live connection. A real application stores one row per connected
  * workspace: the tokens, the `accountId` they cover, and when they expire.
+ *
+ * `blocked` stops every further refresh: `"unusable"` once a refresh failed
+ * after its token may have reached the server, which may already have retired
+ * it, and `"disconnecting"` from the moment a disconnect starts.
  */
-let connection: { tokens: OAuthTokenResponse; accountId?: string } | undefined;
+let connection:
+  | { tokens: OAuthTokenResponse; accountId?: string; blocked?: "unusable" | "disconnecting" }
+  | undefined;
 
 function send(response: ServerResponse, status: number, body: string): void {
   response.writeHead(status, { "content-type": "text/html; charset=utf-8" });
@@ -129,27 +136,78 @@ async function listDocuments(response: ServerResponse): Promise<void> {
 }
 
 /**
- * Renew before the hour is up. Refresh tokens rotate: the new one must be
- * persisted before anything else happens, one refresh at a time per
- * connection, and a timeout means "it may have worked" — re-read the stored
- * token instead of retrying with the old one.
+ * The refresh in flight. Concurrent requests share it, so the same refresh
+ * token is never sent twice. This only covers one process: an application
+ * running several replicas needs a per-connection lock in shared storage.
+ */
+let refreshing: Promise<OAuthTokenResponse> | undefined;
+
+/**
+ * Whether a refresh failed before its request left this process: rejected
+ * arguments, a failed DNS lookup, a refused connection. Only then may the same
+ * refresh token be sent again. A timeout, a dropped connection, a 5xx or an
+ * error answer may all come after the server rotated the token.
+ */
+function failedBeforeSending(error: unknown): boolean {
+  if (error instanceof ConfigurationError) return true;
+  const code = (error as { cause?: { code?: unknown } } | null)?.cause?.code;
+  return code === "ENOTFOUND" || code === "EAI_AGAIN" || code === "ECONNREFUSED";
+}
+
+/**
+ * Renew before the hour is up. Refresh tokens rotate, so each one is sent at
+ * most once: the new one is persisted before anything else happens, one
+ * refresh runs at a time per connection, and a failure that may have reached
+ * the server leaves the connection unusable — the user reconnects.
  */
 async function refresh(response: ServerResponse): Promise<void> {
+  if (connection?.blocked) {
+    send(response, 409, `<p>This connection can no longer be refreshed. <a href="/connect">Connect again</a></p>`);
+    return;
+  }
   const refreshToken = connection?.tokens.refresh_token;
   if (!refreshToken) {
     send(response, 400, "<p>No refresh token — was `offline_access` granted?</p>");
     return;
   }
-  const tokens = await client.oauth.refreshToken({ refreshToken, clientId, clientSecret });
-  connection = { ...connection!, tokens };
+  refreshing ??= client.oauth
+    .refreshToken({ refreshToken, clientId, clientSecret })
+    .then(
+      (tokens) => {
+        connection = { ...connection!, tokens }; // persist before any use
+        return tokens;
+      },
+      (error: unknown) => {
+        // `invalid_grant` means the connection is gone; a timeout or a 5xx
+        // means it may be. Never send this token again — unless storage has
+        // already moved on to a newer one, the user has to reconnect.
+        if (!failedBeforeSending(error) && connection?.tokens.refresh_token === refreshToken) {
+          connection.blocked ??= "unusable";
+        }
+        throw error;
+      },
+    )
+    .finally(() => {
+      refreshing = undefined;
+    });
+  const tokens = await refreshing;
   send(response, 200, `<p>Renewed. Expires in ${tokens.expires_in}s.</p>`);
 }
 
-/** Revoke rather than merely forgetting the token. */
+/**
+ * Revoke rather than merely forgetting the token. No refresh may start once a
+ * disconnect begins, and the one in flight persists its token first, so the
+ * token revoked is the latest one saved — never a retired copy. A failed
+ * revocation keeps the connection blocked, so the disconnect can be retried.
+ */
 async function disconnect(response: ServerResponse): Promise<void> {
-  const token = connection?.tokens.refresh_token ?? connection?.tokens.access_token;
+  if (connection) connection.blocked = "disconnecting";
+  await refreshing?.catch(() => undefined);
+  const refreshToken = connection?.tokens.refresh_token;
+  const token = refreshToken ?? connection?.tokens.access_token;
   if (token) {
-    await client.oauth.revokeToken({ token, tokenTypeHint: "refresh_token", clientId, clientSecret });
+    const tokenTypeHint = refreshToken ? "refresh_token" : "access_token";
+    await client.oauth.revokeToken({ token, tokenTypeHint, clientId, clientSecret });
   }
   connection = undefined;
   send(response, 200, "<p>Disconnected.</p>");
@@ -181,7 +239,10 @@ createServer((request, response) => {
     // Neither message is meant for an end user — log it, show a plain one.
     if (error instanceof OAuthError) {
       console.error(`OAuth ${error.error}: ${error.message}`);
-      send(response, 400, `<p>Could not connect: <code>${error.error}</code></p>`);
+      send(response, 400, `<p>Could not connect: <code>${error.error}</code>. <a href="/connect">Connect again</a></p>`);
+    } else if (error instanceof ApiError && error.status === 401) {
+      // Access token expired or revoked: refresh once, reconnect if that fails.
+      send(response, 401, `<p>Access expired. <a href="/refresh">Refresh</a>, or <a href="/connect">connect again</a> if that fails.</p>`);
     } else if (error instanceof ApiError) {
       console.error(`API ${error.status}: ${error.message}`);
       send(response, 502, "<p>The Assinafy API rejected the request.</p>");

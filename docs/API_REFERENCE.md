@@ -216,10 +216,17 @@ second validates the redirect the browser comes back on.
 | <a id="oauth-revoke-token"></a>`oauth.revokeToken(options)` | `POST /oauth/revoke` | public | [revocation body](#token-revocation-request) | [`void`](#unwrapped-json-pagination-raw-responses-and-void) |
 | <a id="oauth-get-user-info"></a>`oauth.getUserInfo(accessToken?)` | `GET /oauth/userinfo` | bearer | path/query only | [`OAuthUserInfo`](#userinfo-response) |
 
-An access token belongs to exactly one workspace and lives one hour; the
-connection behind it expires 30 days after the user approved it, however often
-it is refreshed. Refresh tokens rotate on every use, and replaying a retired one
-ends the connection.
+An access token belongs to exactly one workspace and lives one hour. Refresh
+tokens rotate on every use, and replaying a retired one ends the connection. A
+refresh token is valid for 30 days and every refresh returns a new one with a
+fresh 30 days, so the connection only expires after 30 days without a refresh.
+
+**Migrating to 2.3.0.** `readAuthorizationCallback` refuses a callback without
+`iss`, `?error=` returns included, with `OAuthError` `invalid_request`; when the
+object passed has no `issuer`, `iss` must be `https://auth.assinafy.com.br`.
+Store the whole [authorization request](#authorization-request-result) and pass
+it back, not only its `state`. `refreshToken` raises `OAuthError`
+`invalid_grant` for a `2xx` without a new `refresh_token`.
 
 ### Users
 
@@ -797,7 +804,8 @@ A declined or failed consent arrives instead as:
 {
   "error": "access_denied",
   "error_description": "The user declined the request",
-  "state": "Ic1n7eJgQ2mQ2g6o4rKnNw"
+  "state": "Ic1n7eJgQ2mQ2g6o4rKnNw",
+  "iss": "https://auth.assinafy.com.br"
 }
 ```
 
@@ -811,14 +819,18 @@ A declined or failed consent arrives instead as:
 }
 ```
 
-`state` and `iss` have already been checked against the stored request. Anything
-that fails — a declined consent, a `state` from another session, a mismatched
-issuer, a missing code — raises `OAuthError` with the reason in `error`.
+`state` and `iss` have already been checked against the stored request — before
+anything else, `?error=` returns included; `iss` must be present and defaults to
+`https://auth.assinafy.com.br` when the stored request has no issuer. Anything
+that fails — a `state` from another session, a missing or mismatched issuer, a
+declined consent, a missing code — raises `OAuthError` with the reason in
+`error`.
 
 #### Token exchange request
 
-Sent as JSON, without any workspace credential. The code is single-use and
-expires 60 seconds after the redirect.
+Sent form-encoded (`application/x-www-form-urlencoded`), without any workspace
+credential; the fields are shown as JSON. The code is single-use and expires 60
+seconds after the redirect. Token requests are never retried.
 
 ```json
 {
@@ -836,6 +848,12 @@ Public applications send the same body without `client_secret`; they
 authenticate with PKCE alone and are never issued one.
 
 #### Token refresh request
+
+Form-encoded, like the exchange. Send each refresh token once: after a timeout,
+a dropped connection, or a `5xx`, the server may already have rotated it, so
+never send it again — unless storage holds a newer one, the user reconnects.
+Only a failure that provably happened before sending (a `ConfigurationError`, a
+DNS failure, a refused connection, a TLS handshake error) may be retried.
 
 ```json
 {
@@ -864,11 +882,15 @@ Both grants return the same shape, flat rather than enveloped.
 
 `refresh_token` is present only when `offline_access` was granted, `id_token`
 only with `openid`. Read `scope` rather than assuming the request was granted in
-full. Persist a returned `refresh_token` **before** doing anything else with the
+full; `offline_access` itself never appears in it, so test for `refresh_token`
+instead. Persist a returned `refresh_token` **before** doing anything else with the
 response: the previous one is already retired, and replaying it ends the
-connection for the user.
+connection for the user. `refreshToken` raises `OAuthError` `invalid_grant` when
+a `2xx` carries no new `refresh_token` — missing, empty, or the one sent.
 
 #### Token revocation request
+
+Form-encoded, like the token requests.
 
 ```json
 {
@@ -1320,6 +1342,7 @@ object.
 {
   "hash": "sha256-signature-hash",
   "id": "doc_01J00000000000000000000000",
+  "agreement_code": "550E8400-E29B-41D4-A716-446655440000",
   "status": "certificated",
   "page_count": 3,
   "signer_count": 2,
@@ -1331,8 +1354,10 @@ object.
 }
 ```
 
-For an unknown/invalid hash, `id`, `status`, counts, and completion time may be
-`null`; inspect `is_valid` and `message`.
+`agreement_code` is the code printed on the document certificate; the sandbox
+does not return it yet. For an unknown/invalid hash, `id`, `agreement_code`,
+`status`, counts, and completion time may be `null`; inspect `is_valid` and
+`message`.
 
 #### Public document response
 
