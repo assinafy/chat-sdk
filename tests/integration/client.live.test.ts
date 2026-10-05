@@ -245,10 +245,11 @@ describeLive("Assinafy API — live sandbox", () => {
     expect(detail.id).toBe(template.id);
 
     expect(detail.roles?.length ?? 0).toBeGreaterThan(0);
-    const role = detail.roles![0]!;
+    const roles = detail.roles!.filter((role) => role.assignment_type !== "Editor");
+    expect(roles.length).toBeGreaterThan(0);
 
     const estimate = await client.templates.estimateCost(env!.accountId, template.id, {
-      signers: [{ role_id: role.id }],
+      signers: roles.map((role) => ({ role_id: role.id })),
     });
     expect(typeof estimate.has_sufficient_resources).toBe("boolean");
   });
@@ -257,12 +258,13 @@ describeLive("Assinafy API — live sandbox", () => {
     const templates = await client.templates.list(env!.accountId, { perPage: 1 });
     const template = templates.data[0]!;
     const detail = await client.templates.get(env!.accountId, template.id);
-    const role = detail.roles![0]!;
+    const roles = detail.roles!.filter((role) => role.assignment_type !== "Editor");
+    expect(roles.length).toBeGreaterThan(0);
 
-    const signer = await ensureSigner(env!.primaryEmail, "Bill M");
+    const signer = await ensureSigner(env!.primaryEmail, "Chat SDK Test");
     const document = await client.templates.instantiate(env!.accountId, template.id, {
       name: `cs-template-${Date.now()}.pdf`,
-      signers: [{ role_id: role.id, id: signer.id }],
+      signers: roles.map((role) => ({ role_id: role.id, id: signer.id })),
     });
     cleanup.push(async () => {
       await waitForDocument(
@@ -425,10 +427,10 @@ describeLive("Assinafy API — live sandbox", () => {
     expect(renamed.name).toContain("renamed-");
   }, 60_000);
 
-  itWithNotifications("full happy path: upload + create signers + create assignment + notification actions", async () => {
+  itWithNotifications("invitation lifecycle: upload + create signers + create assignment + notification actions + decline", async () => {
     // Lookup-or-create makes the test idempotent across runs.
-    const a = await ensureSigner(env!.primaryEmail, "Bill M");
-    const b = await ensureSigner(env!.secondaryEmail, "Bill M");
+    const a = await ensureSigner(env!.primaryEmail, "Chat SDK Test");
+    const b = await ensureSigner(env!.secondaryEmail, "Chat SDK Test");
 
     const doc = await client.documents.upload(env!.accountId, {
       filename: `cs-assign-${Date.now()}.pdf`,

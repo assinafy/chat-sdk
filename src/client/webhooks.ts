@@ -59,7 +59,7 @@ export class WebhooksResource {
   }
 
   /** List webhook delivery attempts for an account. */
-  listDispatches(accountId: string, query: ListWebhookDispatchesQuery = {}): Promise<Page<WebhookDispatch>> {
+  async listDispatches(accountId: string, query: ListWebhookDispatchesQuery = {}): Promise<Page<WebhookDispatch>> {
     return this.http.getPage<WebhookDispatch>(
       withQuery(paths.dispatches(accountId), {
         event: query.event,

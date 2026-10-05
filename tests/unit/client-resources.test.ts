@@ -158,25 +158,25 @@ describe("AssinafyClient resource paths", () => {
     });
   });
 
-  it("rejects assignments that the API cannot execute", () => {
+  it("rejects assignments that the API cannot execute", async () => {
     const { client, requests } = makeClient();
 
-    expect(() =>
+    await expect(
       client.assignments.create("doc", { method: "virtual" } as never),
-    ).toThrow("at least one signer");
-    expect(() =>
+    ).rejects.toThrow("at least one signer");
+    await expect(
       client.assignments.create("doc", {
         method: "collect",
         signers: [{ id: "s1" }],
       } as never),
-    ).toThrow("at least one field entry");
+    ).rejects.toThrow("at least one field entry");
     // The API prices per signer in both modes and refuses a signer-less estimate.
-    expect(() =>
+    await expect(
       client.assignments.estimateCost("doc", {
         method: "collect",
         entries: [{ page_id: "p1", fields: [] }],
       } as never),
-    ).toThrow("at least one signer");
+    ).rejects.toThrow("at least one signer");
     expect(requests).toHaveLength(0);
   });
 
@@ -334,11 +334,17 @@ describe("AssinafyClient resource paths", () => {
     expect(new URL(requests[4]!.url).searchParams.has("signer-access-code")).toBe(false);
   });
 
-  it("rejects invalid pagination before transport", () => {
+  it("rejects invalid pagination before transport", async () => {
     const { client, requests } = makeClient();
 
-    expect(() => client.signers.list("acct", { page: 0 })).toThrow("positive integer");
-    expect(() => client.documents.list("acct", { perPage: 101 })).toThrow("between 1 and 100");
+    await expect(client.signers.list("acct", { page: 0 })).rejects.toThrow("positive integer");
+    await expect(client.documents.list("acct", { perPage: 101 })).rejects.toThrow("between 1 and 100");
+    await expect(client.documents.search("acct", { page: 0 })).rejects.toThrow("positive integer");
+    await expect(client.assignments.list({ page: 0 })).rejects.toThrow("positive integer");
+    await expect(client.tags.list("acct", { page: 0 })).rejects.toThrow("positive integer");
+    await expect(client.templates.list("acct", { page: 0 })).rejects.toThrow("positive integer");
+    await expect(client.webhooks.listDispatches("acct", { page: 0 })).rejects.toThrow("positive integer");
+    await expect(client.signature.listDocuments("signer", "code", { page: 0 })).rejects.toThrow("positive integer");
     expect(requests).toHaveLength(0);
   });
 

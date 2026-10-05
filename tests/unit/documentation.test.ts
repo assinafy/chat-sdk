@@ -17,6 +17,21 @@ const RESOURCE_NAMES = [
 ] as const;
 
 describe("published documentation", () => {
+  it("uses reserved example email domains and excludes local engineering notes", async () => {
+    for (const path of ["README.md", "README.en.md", "docs/API_REFERENCE.md", "docs/API_COVERAGE.md"]) {
+      const document = await readFile(new URL(`../../${path}`, import.meta.url), "utf8");
+      for (const match of document.matchAll(/[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})/g)) {
+        expect(match[1]).toMatch(/^example\.(?:test|com)$/);
+      }
+      expect(document).not.toMatch(/\b(?:audited|audit findings|comparison|comparative|review findings)\b/i);
+    }
+    const ignored = await readFile(new URL("../../.gitignore", import.meta.url), "utf8");
+    expect(ignored.split("\n")).toEqual(expect.arrayContaining(["/AGENTS.md", "/CLAUDE.md"]));
+    const pkg = JSON.parse(await readFile(new URL("../../package.json", import.meta.url), "utf8")) as { files: string[] };
+    expect(pkg.files).not.toContain("AGENTS.md");
+    expect(pkg.files).not.toContain("CLAUDE.md");
+  });
+
   it("covers every resource method, operation link, and JSON payload", async () => {
     const reference = await readFile(new URL("../../docs/API_REFERENCE.md", import.meta.url), "utf8");
     const coverage = await readFile(new URL("../../docs/API_COVERAGE.md", import.meta.url), "utf8");

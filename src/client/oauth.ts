@@ -572,13 +572,13 @@ export class OAuthResource {
    * ```json
    * {
    *   "sub": "d6zqpbyog2v3xvxerwn8la94",
-   *   "name": "Aline Costa",
+   *   "name": "Example Signer",
    *   "email": "owner@example.test",
    *   "email_verified": true
    * }
    * ```
-   * @throws {OAuthError} `invalid_token` when the token expired or was revoked,
-   *   or `insufficient_scope` when `openid` was never granted — the missing
+   * @throws {ApiError} `401` when the token expired or was revoked.
+   * @throws {OAuthError} `insufficient_scope` when `openid` was never granted — the missing
    *   permission is on {@link OAuthError.scope}.
    */
   getUserInfo(accessToken?: string): Promise<OAuthUserInfo> {

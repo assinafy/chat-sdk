@@ -12,6 +12,15 @@ function mkResponse(body: unknown, init: ResponseInit & { headers?: Record<strin
 }
 
 describe("HttpClient", () => {
+  it("rejects JSON serialization failures without throwing synchronously or sending", async () => {
+    const fetchImpl = vi.fn();
+    const http = new HttpClient({ baseUrl: "https://api", auth: { kind: "none" }, fetch: fetchImpl });
+    for (const method of ["post", "put", "patch"] as const) {
+      await expect(http[method]("/x", { value: 1n })).rejects.toBeInstanceOf(TypeError);
+    }
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("unwraps the envelope on GET", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(mkResponse({ status: 200, message: "", data: { id: "x" } }));
     const http = new HttpClient({ baseUrl: "https://api", auth: { kind: "apiKey", apiKey: "k" }, fetch: fetchImpl });

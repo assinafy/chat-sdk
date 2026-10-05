@@ -478,7 +478,7 @@ if (!process.env.ASSINAFY_API_KEY && !process.env.ASSINAFY_ACCESS_TOKEN) {
 
 // 1. Signatários são registros no escopo da conta, reutilizáveis entre documentos.
 const signatario = await client.signers.create(accountId, {
-  full_name: "Aline Costa",
+  full_name: "Example Signer",
   email: "signatario@example.test",
 });
 
@@ -615,11 +615,11 @@ signatários, e instanciar um deles vincula um signatário concreto a cada papel
 ```ts
 const { data: templates } = await client.templates.list(accountId, { perPage: 10 });
 const template = await client.templates.get(accountId, templates[0]!.id);
-const papel = template.roles![0]!;
+const papeis = template.roles!.filter((papel) => papel.assignment_type !== "Editor");
 
 const criado = await client.templates.instantiate(accountId, template.id, {
   name: "nda-acme.pdf",
-  signers: [{ role_id: papel.id, id: signatario.id }],
+  signers: papeis.map((papel) => ({ role_id: papel.id, id: signatario.id })),
 });
 ```
 
@@ -915,6 +915,48 @@ opcionalmente, `ASSINAFY_CLIENT_SECRET`, e precisa de um túnel https porque
 
 ---
 
+### Executando o exemplo OAuth localmente
+
+Use uma conta de teste dedicada em produção: descoberta e tokens OAuth são
+servidos por produção; os testes CRUD de documentos usam o sandbox. Com
+`cloudflared` instalado, abra um túnel HTTPS temporário:
+
+```bash
+cloudflared tunnel --url http://localhost:8787
+```
+
+Cadastre a URL HTTPS gerada com `/oauth/callback` nas URIs da aplicação.
+Configure o `client_id`, essa URI exata e, apenas para aplicações confidenciais,
+o segredo no ambiente:
+
+```bash
+ASSINAFY_CLIENT_ID=seu-client-id \
+ASSINAFY_REDIRECT_URI=https://seu-tunel.example.com/oauth/callback \
+ASSINAFY_BASE_URL=https://api.assinafy.com.br/v1 \
+  npx tsx examples/oauth-connect.ts
+```
+
+Abra `http://localhost:8787/`, conecte, selecione a conta de teste, aprove as
+permissões, liste documentos, renove uma vez e desconecte. A desconexão revoga o
+token mais recente. O endereço do Quick Tunnel muda ao reiniciar; atualize a URI
+cadastrada e reinicie o exemplo juntos. Encerre ambos os processos após o teste.
+
+O exemplo escapa texto da API, escuta apenas em loopback e exige POST com
+origem permitida para renovar ou desconectar. Execute `npm run test:example`
+para conferir métodos, origem, estado do callback e cabeçalhos sem chamar a API.
+
+O exemplo mantém uma conexão em memória e é um servidor local para aprendizado.
+Uma aplicação de marketplace precisa de sessões autenticadas, tentativas
+pendentes vinculadas à sessão com expiração e uso único, armazenamento durável e
+criptografado de tokens por usuário/conta e exclusão mútua de refresh por conexão
+entre réplicas. Proteja mudanças de conexão contra CSRF, escape valores da API
+no HTML e exponha pelo túnel somente as rotas de callback necessárias. Peça os
+escopos mínimos, confira os concedidos e valide o `id_token` OIDC antes de usá-lo
+como identidade. Use o endpoint userinfo autenticado para obter claims quando a
+validação JWT não fizer parte da aplicação.
+
+---
+
 ## 12. Desenvolvimento e verificação
 
 Um comando roda tudo o que a CI roda — verificação de tipos do código-fonte,
@@ -942,8 +984,7 @@ dedicada, nunca produção; a suíte recusa qualquer base URL que não seja o ho
 de sandbox.
 
 Dois testes ficam atrás de `ASSINAFY_TEST_NOTIFICATIONS=1` porque fazem a
-Assinafy enviar notificações reais: instanciação de template e o caminho feliz
-completo de assinatura. Habilitá-los exige também
+Assinafy enviar notificações reais: instanciação de template e o ciclo de convite e recusa de assinatura. Habilitá-los exige também
 `ASSINAFY_TEST_EMAIL_PRIMARY` e `ASSINAFY_TEST_EMAIL_SECONDARY`.
 
 | Variável | Padrão | Propósito |

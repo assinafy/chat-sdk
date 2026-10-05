@@ -45,7 +45,7 @@ export class AssignmentsResource {
    * List the assignments belonging to the authenticated user's current
    * account.
    */
-  list(query: ListAssignmentsQuery = {}): Promise<Page<Assignment>> {
+  async list(query: ListAssignmentsQuery = {}): Promise<Page<Assignment>> {
     return this.http.getPage<Assignment>(
       withQuery(paths.list(), pageQuery(query.page, query.perPage)),
     );
@@ -58,7 +58,7 @@ export class AssignmentsResource {
    * verification, notification, and signing-order settings. The `signerIds`
    * and `signer_ids` convenience aliases are normalized to that field.
    */
-  create(documentId: string, input: CreateAssignmentInput): Promise<Assignment> {
+  async create(documentId: string, input: CreateAssignmentInput): Promise<Assignment> {
     const body = normalizeAssignmentInput(input);
     if (!Array.isArray(body.signers) || body.signers.length === 0) {
       throw new ConfigurationError("AssignmentsResource.create requires at least one signer");
@@ -76,7 +76,7 @@ export class AssignmentsResource {
    * signer in both methods and answers a signer-less estimate with
    * `400 "Pelo menos um signatários precisa ser informado."`
    */
-  estimateCost(documentId: string, input: EstimateAssignmentCostInput): Promise<CostEstimate> {
+  async estimateCost(documentId: string, input: EstimateAssignmentCostInput): Promise<CostEstimate> {
     const body = normalizeAssignmentInput(input);
     if (!Array.isArray(body.signers) || body.signers.length === 0) {
       throw new ConfigurationError("AssignmentsResource.estimateCost requires at least one signer");

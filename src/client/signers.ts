@@ -37,7 +37,7 @@ export class SignersResource {
   constructor(private readonly http: HttpClient) {}
 
   /** List signers for the given account, optionally filtered by `search`. */
-  list(accountId: string, query: ListSignersQuery = {}): Promise<Page<Signer>> {
+  async list(accountId: string, query: ListSignersQuery = {}): Promise<Page<Signer>> {
     return this.http.getPage<Signer>(
       withQuery(paths.collection(accountId), {
         search: query.search,

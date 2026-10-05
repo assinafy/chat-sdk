@@ -55,7 +55,7 @@ export class DocumentsResource {
   }
 
   /** List documents for an account, with optional filters. */
-  list(accountId: string, query: ListDocumentsQuery = {}): Promise<Page<Document>> {
+  async list(accountId: string, query: ListDocumentsQuery = {}): Promise<Page<Document>> {
     return this.http.getPage<Document>(
       withQuery(paths.collection(accountId), {
         status: csv(query.status),
@@ -73,7 +73,7 @@ export class DocumentsResource {
    * (no expanded assignment/pages) — cheaper than {@link list} when you only
    * need to resolve names/ids.
    */
-  search(accountId: string, query: SearchDocumentsQuery = {}): Promise<Page<Document>> {
+  async search(accountId: string, query: SearchDocumentsQuery = {}): Promise<Page<Document>> {
     return this.http.getPage<Document>(
       withQuery(paths.search(accountId), {
         search: query.search,

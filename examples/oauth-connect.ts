@@ -23,6 +23,9 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import {
   AssinafyClient,
+  Card,
+  Text,
+  renderHtml,
   ApiError,
   ConfigurationError,
   OAuthError,
@@ -66,7 +69,11 @@ let connection:
   | undefined;
 
 function send(response: ServerResponse, status: number, body: string): void {
-  response.writeHead(status, { "content-type": "text/html; charset=utf-8" });
+  response.writeHead(status, {
+    "content-type": "text/html; charset=utf-8",
+    "cache-control": "no-store",
+    "referrer-policy": "no-referrer",
+  });
   response.end(body);
 }
 
@@ -77,7 +84,7 @@ async function start(response: ServerResponse): Promise<void> {
     redirectUri,
     // Ask for the minimum your product needs: the user approves all of it or
     // none. `offline_access` is what buys a refresh token.
-    scopes: ["documents:read", "documents:write", "offline_access"],
+    scopes: ["documents:read", "account:read", "offline_access"],
   });
   pending.set(request.state, request);
   response.writeHead(302, { location: request.url });
@@ -116,10 +123,13 @@ async function callback(url: URL, response: ServerResponse): Promise<void> {
   send(
     response,
     200,
-    `<p>Connected to workspace <code>${account?.id ?? "unknown"}</code>.</p>
-     <p>Granted: <code>${tokens.scope ?? ""}</code></p>
-     <p><a href="/documents">List documents</a> · <a href="/refresh">Refresh</a> ·
-        <a href="/disconnect">Disconnect</a></p>`,
+    renderHtml(Card({ children: [
+      Text(`Connected to workspace ${account?.id ?? "unknown"}.`),
+      Text(`Granted: ${tokens.scope ?? ""}`),
+    ] })) +
+      `<p><a href="/documents">List documents</a></p>
+       <form method="post" action="/refresh"><button>Refresh</button></form>
+       <form method="post" action="/disconnect"><button>Disconnect</button></form>`,
   );
 }
 
@@ -131,8 +141,8 @@ async function listDocuments(response: ServerResponse): Promise<void> {
   }
   const connected = new AssinafyClient({ accessToken: connection.tokens.access_token });
   const page = await connected.documents.list(connection.accountId, { perPage: 10 });
-  const rows = page.data.map((document) => `<li>${document.name} — ${document.status}</li>`);
-  send(response, 200, `<ul>${rows.join("") || "<li>No documents yet.</li>"}</ul>`);
+  const rows = page.data.map((document) => Text(`${document.name} — ${document.status}`));
+  send(response, 200, renderHtml(Card({ children: rows.length ? rows : [Text("No documents yet.")] })));
 }
 
 /**
@@ -191,7 +201,7 @@ async function refresh(response: ServerResponse): Promise<void> {
       refreshing = undefined;
     });
   const tokens = await refreshing;
-  send(response, 200, `<p>Renewed. Expires in ${tokens.expires_in}s.</p>`);
+  send(response, 200, renderHtml(Card({ children: [Text(`Renewed. Expires in ${tokens.expires_in}s.`)] })));
 }
 
 /**
@@ -215,6 +225,14 @@ async function disconnect(response: ServerResponse): Promise<void> {
 
 async function route(request: IncomingMessage, response: ServerResponse): Promise<void> {
   const url = new URL(request.url ?? "/", `http://localhost:${PORT}`);
+  const mutating = url.pathname === "/refresh" || url.pathname === "/disconnect";
+  if (request.method !== (mutating ? "POST" : "GET")) {
+    return send(response, 405, "<p>Method not allowed.</p>");
+  }
+  if (mutating && request.headers.origin !== new URL(redirectUri).origin &&
+      request.headers.origin !== `http://localhost:${PORT}`) {
+    return send(response, 403, "<p>Invalid request origin.</p>");
+  }
   switch (url.pathname) {
     case "/":
       return send(response, 200, `<p><a href="/connect">Connect Assinafy</a></p>`);
@@ -239,10 +257,12 @@ createServer((request, response) => {
     // Neither message is meant for an end user — log it, show a plain one.
     if (error instanceof OAuthError) {
       console.error(`OAuth ${error.error}: ${error.message}`);
-      send(response, 400, `<p>Could not connect: <code>${error.error}</code>. <a href="/connect">Connect again</a></p>`);
+      send(response, 400, renderHtml(Card({ children: [Text(`Could not connect: ${error.error}.`)] })) +
+        `<p><a href="/connect">Connect again</a></p>`);
     } else if (error instanceof ApiError && error.status === 401) {
       // Access token expired or revoked: refresh once, reconnect if that fails.
-      send(response, 401, `<p>Access expired. <a href="/refresh">Refresh</a>, or <a href="/connect">connect again</a> if that fails.</p>`);
+      send(response, 401, `<p>Access expired. <a href="/connect">Connect again</a> if refresh fails.</p>
+        <form method="post" action="/refresh"><button>Refresh</button></form>`);
     } else if (error instanceof ApiError) {
       console.error(`API ${error.status}: ${error.message}`);
       send(response, 502, "<p>The Assinafy API rejected the request.</p>");
@@ -251,6 +271,6 @@ createServer((request, response) => {
       send(response, 500, "<p>Unexpected error.</p>");
     }
   });
-}).listen(PORT, () => {
+}).listen(PORT, "127.0.0.1", () => {
   console.log(`Listening on http://localhost:${PORT} — redirect URI ${redirectUri}`);
 });

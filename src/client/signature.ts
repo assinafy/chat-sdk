@@ -142,7 +142,7 @@ export class SignatureResource {
   }
 
   /** List documents visible to a signer. */
-  listDocuments(
+  async listDocuments(
     signerId: string,
     accessCode: string,
     query: ListSignerDocumentsQuery = {},

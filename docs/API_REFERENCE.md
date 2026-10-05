@@ -81,7 +81,8 @@ assembled from the unwrapped array and `X-Pagination-*` headers:
 ```
 
 Pagination uses positive integer `page` values and `perPage` values from 1 to
-100. The SDK rejects values outside those bounds before transport and encodes
+100. Promise-returning methods reject invalid arguments asynchronously, including
+pagination and assignment validation. The SDK rejects values outside those bounds before transport and encodes
 `perPage` as `per-page`.
 
 Download methods return the native `Response` without parsing its body:
@@ -130,6 +131,7 @@ try {
 | `AssinafyError` | Base class for SDK-defined errors |
 | `ConfigurationError` | Invalid client URL, credential combination, transport setting, or request option |
 | `ApiError` | `status`, parsed `body`, redacted `path`, and uppercase `method` |
+| `OAuthError` | Extends `ApiError`; `error`, `errorDescription`, and optional `scope` |
 | `NotImplementedError` | Unsupported adapter `adapter` and `operation` |
 | `WebhookSignatureError` | Invalid or stale webhook signature |
 
@@ -534,7 +536,7 @@ provider value is `google`.
   "access_token": "bearer-token",
   "user": {
     "id": "usr_01J00000000000000000000000",
-    "name": "Aline Costa",
+    "name": "Example Signer",
     "email": "owner@example.test",
     "telephone": "+5511999999999",
     "government_id": "12345678909",
@@ -628,7 +630,7 @@ unwrapped response:
 ```json
 {
   "id": "usr_01J00000000000000000000000",
-  "name": "Aline Costa",
+  "name": "Example Signer",
   "email": "owner@example.test",
   "telephone": "+5511999999999",
   "government_id": "12345678909",
@@ -910,7 +912,7 @@ exists. Only failed client authentication is reported, as `invalid_client`.
 ```json
 {
   "sub": "d6zqpbyog2v3xvxerwn8la94",
-  "name": "Aline Costa",
+  "name": "Example Signer",
   "email": "owner@example.test",
   "email_verified": true
 }
@@ -969,7 +971,7 @@ does not declare `sort` for this path; see
 
 ```json
 {
-  "full_name": "Aline Costa",
+  "full_name": "Example Signer",
   "email": "signer@example.test",
   "whatsapp_phone_number": "+5511999999999"
 }
@@ -982,7 +984,7 @@ notification destination before assigning the signer.
 
 ```json
 {
-  "full_name": "Aline de Costa",
+  "full_name": "Example Signer",
   "email": "signer@example.test",
   "whatsapp_phone_number": "+5511988888888",
   "government_id": "12345678909"
@@ -997,7 +999,7 @@ Request body:
 
 ```json
 {
-  "full_name": "Aline Costa",
+  "full_name": "Example Signer",
   "email": "signer@example.test",
   "government_id": "12345678909"
 }
@@ -1012,7 +1014,7 @@ The SDK type also accepts `whatsapp_phone_number` and `has_accepted_terms`.
 {
   "resource": "signer",
   "id": "sig_01J00000000000000000000000",
-  "full_name": "Aline Costa",
+  "full_name": "Example Signer",
   "email": "signer@example.test",
   "whatsapp_phone_number": "+5511999999999",
   "government_id": "12345678909",
@@ -1048,7 +1050,7 @@ timestamps as shown above.
 {
   "resource": "signer",
   "id": "sig_01J00000000000000000000000",
-  "full_name": "Aline Costa",
+  "full_name": "Example Signer",
   "email": "signer@example.test",
   "whatsapp_phone_number": "+5511999999999",
   "government_id": "12345678909",
@@ -1196,7 +1198,7 @@ the nested assignment, item, page, signer, summary, and signing URL objects:
   "updated_at": "2026-08-20T14:31:00Z",
   "current_signer": {
     "id": "sig_01J00000000000000000000000",
-    "full_name": "Aline Costa",
+    "full_name": "Example Signer",
     "email": "signer@example.test",
     "has_accepted_terms": true,
     "completed": false
@@ -1223,7 +1225,7 @@ the nested assignment, item, page, signer, summary, and signing URL objects:
     "signers": [
       {
         "id": "sig_01J00000000000000000000000",
-        "full_name": "Aline Costa",
+        "full_name": "Example Signer",
         "email": "signer@example.test",
         "whatsapp_phone_number": "+5511999999999",
         "government_id": "12345678909",
@@ -1258,7 +1260,7 @@ the nested assignment, item, page, signer, summary, and signing URL objects:
         },
         "signer": {
           "id": "sig_01J00000000000000000000000",
-          "full_name": "Aline Costa",
+          "full_name": "Example Signer",
           "email": "signer@example.test",
           "has_accepted_terms": true
         },
@@ -1287,7 +1289,7 @@ the nested assignment, item, page, signer, summary, and signing URL objects:
       "signers": [
         {
           "id": "sig_01J00000000000000000000000",
-          "full_name": "Aline Costa",
+          "full_name": "Example Signer",
           "email": "signer@example.test",
           "whatsapp_phone_number": "+5511999999999",
           "has_accepted_terms": true,
@@ -1320,7 +1322,7 @@ activity-specific properties can grow without an SDK release.
     "id": 4812,
     "event": "signer_viewed_document",
     "type": "SignerViewedDocument",
-    "message": "Aline Costa viewed contract.pdf",
+    "message": "Example Signer viewed contract.pdf",
     "payload": {
       "document_id": "doc_01J00000000000000000000000",
       "signer_id": "sig_01J00000000000000000000000"
@@ -1370,7 +1372,7 @@ compact member of that return union:
   "id": "doc_01J00000000000000000000000",
   "name": "contract.pdf",
   "page_count": 3,
-  "created_by": "Aline Costa"
+  "created_by": "Example Signer"
 }
 ```
 
@@ -1401,7 +1403,7 @@ an optional `SendPublicTokenResult`:
     "id": "doc_01J00000000000000000000000",
     "name": "contract.pdf",
     "page_count": 3,
-    "created_by": "Aline Costa"
+    "created_by": "Example Signer"
   },
   "channel": "email",
   "recipient": "signer@example.test"
@@ -1618,7 +1620,7 @@ properties.
       "value": "Purchase order 1234"
     }
   ],
-  "name": "NDA - Aline Costa.pdf",
+  "name": "NDA - Example Signer.pdf",
   "message": "Please review and sign.",
   "expires_at": "2026-09-20T23:59:59Z",
   "tags": ["Legal"]
@@ -1645,8 +1647,10 @@ is the array shown above. The SDK retains the inline signer and keyed
 }
 ```
 
-Passing the signer array directly is an SDK shorthand; the wire body is always
-the object above.
+Include a binding for every signer role returned by `templates.get()`, not just
+`roles[0]`; roles with `assignment_type: "Editor"` are not signers. Supply required
+editor values through `editor_fields` when instantiating. Passing the signer array
+directly is an SDK shorthand; the wire body is always the object above.
 
 #### Cost estimate response
 
@@ -1659,8 +1663,8 @@ the object above.
   "total_credits": 2,
   "breakdown": [
     {
-      "code": "email_signature_request",
-      "name": "Email signature request",
+      "code": "SignatureDigitalCertificate",
+      "name": "Digital certificate signature",
       "cost": 2,
       "quantity": 1,
       "unit_cost": 2
@@ -1675,6 +1679,10 @@ the object above.
   "currency": "BRL"
 }
 ```
+
+This example prices one digital-certificate signer with email notification: the
+signature costs 2 credits and the notification is free. WhatsApp notification
+adds 0.45 credit. Read the returned breakdown for the selected methods and plan.
 
 The shared `CostEstimate` response type covers assignment, resend, and template
 estimation. Its fields are optional because estimate operations can return
@@ -1852,7 +1860,7 @@ Decline:
   "signers": [
     {
       "id": "sig_01J00000000000000000000000",
-      "full_name": "Aline Costa",
+      "full_name": "Example Signer",
       "email": "signer@example.test",
       "whatsapp_phone_number": "+5511999999999",
       "government_id": "12345678909",
@@ -1875,7 +1883,7 @@ Decline:
     "signers": [
       {
         "id": "sig_01J00000000000000000000000",
-        "full_name": "Aline Costa",
+        "full_name": "Example Signer",
         "email": "signer@example.test",
         "whatsapp_phone_number": "+5511999999999",
         "has_accepted_terms": true,
@@ -1944,7 +1952,7 @@ These are the only query parameters published for the field-list operation.
 {
   "type": "text",
   "name": "Approval code",
-  "regex": "^[A-Z]{3}-[0-9]{3}$",
+  "regex": "/^[A-Z]{3}-[0-9]{3}$/",
   "is_required": true
 }
 ```
@@ -1960,7 +1968,7 @@ Request body:
 ```json
 {
   "name": "Approval reference",
-  "regex": "^[A-Z]{3}-[0-9]{4}$",
+  "regex": "/^[A-Z]{3}-[0-9]{4}$/",
   "is_active": true
 }
 ```
@@ -2004,7 +2012,7 @@ The body itself is an array:
   "id": "fld_01J00000000000000000000000",
   "name": "Approval code",
   "type": "text",
-  "regex": "^[A-Z]{3}-[0-9]{3}$",
+  "regex": "/^[A-Z]{3}-[0-9]{3}$/",
   "is_pre_defined": false,
   "is_active": true,
   "is_required": true,
@@ -2233,7 +2241,7 @@ custom or newly published endpoints.
 | `AssinafyClient.fromEnv(env?)` | Reads `ASSINAFY_API_KEY`, `ASSINAFY_ACCESS_TOKEN`, `ASSINAFY_BASE_URL`, and `ASSINAFY_ACCOUNT_ID`; returns an unauthenticated client if neither credential exists. |
 | `accountId` | The optional default account ID supplied by the caller. Resource methods still take explicit account IDs. |
 | `http` | Configured `HttpClient` instance for advanced calls. |
-| `accounts`, `assignments`, `auth`, `documents`, `fields`, `signature`, `signers`, `tags`, `templates`, `users`, `webhooks` | Stateless resource instances documented above. |
+| `accounts`, `assignments`, `auth`, `documents`, `fields`, `oauth`, `signature`, `signers`, `tags`, `templates`, `users`, `webhooks` | Stateless resource instances documented above. |
 
 Complete constructor example:
 
@@ -2265,6 +2273,7 @@ const http = new HttpClient({
 
 | Method | Request | Return |
 | --- | --- | --- |
+| `fork({ baseUrl?, auth? }?)` | Clone URL/auth configuration while preserving fetch, retries, User-Agent, and rate-limit observer | `HttpClient` |
 | `get<T>(path, init?)` | `GET`; no automatic body | unwrapped `Promise<T>` |
 | `post<T>(path, body?, init?)` | JSON `POST` unless `init` supplies a specialized body | unwrapped `Promise<T>` |
 | `put<T>(path, body?, init?)` | JSON `PUT` unless `init` supplies a specialized body | unwrapped `Promise<T>` |
@@ -2355,13 +2364,13 @@ const message: IncomingMessage = {
   text: "Please show document status",
   author: {
     id: "user-789",
-    displayName: "Aline Costa",
+    displayName: "Example Signer",
     email: "aline@example.test",
     metadata: { tenant: "acme" },
   },
   from: {
     id: "user-789",
-    displayName: "Aline Costa",
+    displayName: "Example Signer",
     email: "aline@example.test",
     metadata: { tenant: "acme" },
   },
@@ -2389,8 +2398,8 @@ const action: IncomingAction = {
   threadId: "thread-456",
   actionId: "approve",
   value: "doc_01J00000000000000000000000",
-  author: { id: "user-789", displayName: "Aline Costa" },
-  from: { id: "user-789", displayName: "Aline Costa" },
+  author: { id: "user-789", displayName: "Example Signer" },
+  from: { id: "user-789", displayName: "Example Signer" },
   sentAt: new Date("2026-08-20T15:01:00Z"),
   raw: { provider_specific: true },
 };
@@ -2487,7 +2496,7 @@ await memory.receive({
   text: "/status doc_01J00000000000000000000000",
   author: {
     id: "user-789",
-    displayName: "Aline Costa",
+    displayName: "Example Signer",
     email: "aline@example.test",
     metadata: { tenant: "acme" },
   },
@@ -2597,7 +2606,7 @@ Complete card payload using every primitive:
     {
       "type": "table",
       "headers": ["Signer", "Status"],
-      "rows": [["Aline Costa", "Pending"]],
+      "rows": [["Example Signer", "Pending"]],
       "align": ["left", "center"]
     },
     {
@@ -2605,7 +2614,7 @@ Complete card payload using every primitive:
       "id": "assignee",
       "label": "Assignee",
       "placeholder": "Choose a signer",
-      "options": [{ "label": "Aline Costa", "value": "signer-id" }]
+      "options": [{ "label": "Example Signer", "value": "signer-id" }]
     },
     {
       "type": "radio-select",
@@ -2624,7 +2633,7 @@ Complete card payload using every primitive:
     {
       "type": "signer-status",
       "signers": [
-        { "name": "Aline Costa", "email": "aline@example.test", "completed": false }
+        { "name": "Example Signer", "email": "aline@example.test", "completed": false }
       ]
     }
   ]
@@ -2701,7 +2710,7 @@ shape is:
   "role": "user",
   "content": "Please show the contract.\n\nAttachments:\n- contract.pdf (application/pdf): https://example.com/contract.pdf",
   "tool_call_id": "optional-tool-call-id",
-  "name": "Aline_Costa"
+  "name": "Example_Signer"
 }
 ```
 

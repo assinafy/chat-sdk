@@ -25,7 +25,7 @@ export class TagsResource {
   constructor(private readonly http: HttpClient) {}
 
   /** List all tags for an account. */
-  list(accountId: string, query: ListTagsQuery | string = {}): Promise<Page<Tag>> {
+  async list(accountId: string, query: ListTagsQuery | string = {}): Promise<Page<Tag>> {
     const normalized = typeof query === "string" ? { search: query } : query;
     return this.http.getPage<Tag>(
       withQuery(paths.collection(accountId), {

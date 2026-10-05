@@ -75,7 +75,7 @@ export interface ResponseWithMeta<T> {
  * User-Agent never drifts from the published version.
  */
 declare const __SDK_VERSION__: string | undefined;
-const VERSION = typeof __SDK_VERSION__ !== "undefined" ? __SDK_VERSION__ : "2.3.0";
+const VERSION = typeof __SDK_VERSION__ !== "undefined" ? __SDK_VERSION__ : "2.3.1";
 const DEFAULT_USER_AGENT = `@assinafy/chat-sdk/${VERSION}`;
 const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 const RETRYABLE_METHOD = new Set(["GET", "HEAD", "OPTIONS"]);
@@ -187,17 +187,17 @@ export class HttpClient {
   }
 
   /** Convenience: POST with a JSON body. */
-  post<T>(path: string, body?: unknown, init: RequestInit = {}): Promise<T> {
+  async post<T>(path: string, body?: unknown, init: RequestInit = {}): Promise<T> {
     return this.request<T>(path, withJsonBody(init, "POST", body)).then((r) => r.data);
   }
 
   /** Convenience: PUT with a JSON body. */
-  put<T>(path: string, body?: unknown, init: RequestInit = {}): Promise<T> {
+  async put<T>(path: string, body?: unknown, init: RequestInit = {}): Promise<T> {
     return this.request<T>(path, withJsonBody(init, "PUT", body)).then((r) => r.data);
   }
 
   /** Convenience: PATCH with a JSON body. */
-  patch<T>(path: string, body?: unknown, init: RequestInit = {}): Promise<T> {
+  async patch<T>(path: string, body?: unknown, init: RequestInit = {}): Promise<T> {
     return this.request<T>(path, withJsonBody(init, "PATCH", body)).then((r) => r.data);
   }
 

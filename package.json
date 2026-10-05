@@ -1,6 +1,6 @@
 {
   "name": "@assinafy/chat-sdk",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "description": "Chat SDK for Assinafy — build chat bots and conversational integrations on top of the Assinafy document-signing API.",
   "license": "MIT",
   "author": "Assinafy",
@@ -104,8 +104,9 @@
     "test:unit": "vitest run tests/unit",
     "test:coverage": "vitest run tests/unit --coverage",
     "test:integration": "vitest run tests/integration",
+    "test:example": "node scripts/smoke-oauth-example.mjs",
     "test:package": "node scripts/smoke-package.mjs",
-    "verify": "npm run typecheck && npm run typecheck:tests && npm run typecheck:examples && npm run lint && npm run test:coverage && npm run build && npm run test:package",
+    "verify": "npm run typecheck && npm run typecheck:tests && npm run typecheck:examples && npm run lint && npm run test:example && npm run test:coverage && npm run build && npm run test:package",
     "prepublishOnly": "npm run verify"
   },
   "keywords": [

@@ -465,7 +465,7 @@ if (!process.env.ASSINAFY_API_KEY && !process.env.ASSINAFY_ACCESS_TOKEN) {
 
 // 1. Signers are account-scoped records, reusable across documents.
 const signer = await client.signers.create(accountId, {
-  full_name: "Aline Costa",
+  full_name: "Example Signer",
   email: "signer@example.test",
 });
 
@@ -579,11 +579,11 @@ instantiating one binds a concrete signer to each role:
 ```ts
 const { data: templates } = await client.templates.list(accountId, { perPage: 10 });
 const template = await client.templates.get(accountId, templates[0]!.id);
-const role = template.roles![0]!;
+const roles = template.roles!.filter((role) => role.assignment_type !== "Editor");
 
 const created = await client.templates.instantiate(accountId, template.id, {
   name: "nda-acme.pdf",
-  signers: [{ role_id: role.id, id: signer.id }],
+  signers: roles.map((role) => ({ role_id: role.id, id: signer.id })),
 });
 ```
 
@@ -876,6 +876,48 @@ and optionally `ASSINAFY_CLIENT_SECRET`, and needs an https tunnel because
 
 ---
 
+### Running the OAuth example locally
+
+Use a dedicated production test workspace: OAuth discovery and token routes are
+served by production, while document CRUD tests use the sandbox. With
+`cloudflared` installed, start a temporary HTTPS tunnel:
+
+```bash
+cloudflared tunnel --url http://localhost:8787
+```
+
+Register the generated HTTPS URL plus `/oauth/callback` in the application's
+redirect URIs. Configure its `client_id`, that exact URI, and the secret only
+for a confidential application:
+
+```bash
+ASSINAFY_CLIENT_ID=your-client-id \
+ASSINAFY_REDIRECT_URI=https://your-tunnel.example.com/oauth/callback \
+ASSINAFY_BASE_URL=https://api.assinafy.com.br/v1 \
+  npx tsx examples/oauth-connect.ts
+```
+
+Open `http://localhost:8787/`, connect, choose the test workspace, approve the
+permissions, list documents, refresh once, and disconnect. Disconnect revokes
+the latest token. Quick Tunnel addresses change on restart; update the registered
+URI and restart the example together. Stop both processes after testing.
+
+The example escapes API text, binds to loopback, and requires POST with an
+allowed origin for refresh and disconnect. Run `npm run test:example` to check
+methods, origins, callback state, and headers without calling the API.
+
+This example serves one connection in process memory and is a local learning
+server. A marketplace application needs authenticated user sessions, expiring
+single-use pending attempts bound to those sessions, encrypted durable token
+storage per user/workspace, and a shared per-connection refresh lock across
+replicas. Protect connection changes with CSRF checks, escape API values in
+HTML, and expose only intended callback routes through the tunnel. Request the
+minimum scopes, check the granted scopes, and validate an OIDC `id_token` before
+using it as identity. Use the authenticated userinfo endpoint for claims when
+JWT validation is not part of your application.
+
+---
+
 ## 12. Development and verification
 
 One command runs everything CI runs — type-checking of the source, tests, and
@@ -902,8 +944,8 @@ and webhook mutation. Run it only against a dedicated sandbox account, never
 production; the suite refuses any base URL other than the sandbox host.
 
 Two tests are gated behind `ASSINAFY_TEST_NOTIFICATIONS=1` because they cause
-Assinafy to send real notifications: template instantiation and the full signing
-happy path. Enabling them also requires `ASSINAFY_TEST_EMAIL_PRIMARY` and
+Assinafy to send real notifications: template instantiation and the invitation/decline
+lifecycle. Enabling them also requires `ASSINAFY_TEST_EMAIL_PRIMARY` and
 `ASSINAFY_TEST_EMAIL_SECONDARY`.
 
 | Variable | Default | Purpose |

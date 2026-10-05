@@ -39,7 +39,7 @@ export class TemplatesResource {
   constructor(private readonly http: HttpClient) {}
 
   /** List all templates available under the account. */
-  list(accountId: string, query: ListTemplatesQuery = {}): Promise<Page<Template>> {
+  async list(accountId: string, query: ListTemplatesQuery = {}): Promise<Page<Template>> {
     return this.http.getPage<Template>(
       withQuery(paths.collection(accountId), {
         status: query.status,
