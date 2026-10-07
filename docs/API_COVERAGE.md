@@ -1,6 +1,6 @@
 # Assinafy v1 API operation index
 
-This index lists the 93 Assinafy v1 operations, their SDK methods, request and
+This index lists the 106 Assinafy v1 operations, their SDK methods, request and
 response documentation, and authentication mode. Paths include the `/v1`
 prefix; SDK resource methods use a `baseUrl` that already contains it.
 
@@ -28,7 +28,7 @@ Authentication labels:
 | --- | ---: |
 | Accounts | 10 |
 | Assignments | 7 |
-| Authentication | 9 |
+| Authentication | 15 |
 | Documents | 18 |
 | Fields | 8 |
 | OAuth | 4 |
@@ -37,8 +37,8 @@ Authentication labels:
 | Tags | 4 |
 | Templates | 1 |
 | Users | 4 |
-| Webhooks | 6 |
-| **Total** | **93** |
+| Webhooks | 13 |
+| **Total** | **106** |
 
 ## Operations
 
@@ -74,6 +74,12 @@ Authentication labels:
 | Method | Path | SDK method | Request | SDK response | Auth |
 | --- | --- | --- | --- | --- | --- |
 | POST | `/v1/login` | `client.auth.login` | [Request](API_REFERENCE.md#auth-login) | [Unwrapped response](API_REFERENCE.md#auth-login) | Public |
+| POST | `/v1/authentication/mfa/verify` | `client.auth.verifyMfa` | [Request](API_REFERENCE.md#auth-verify-mfa) | [Unwrapped response](API_REFERENCE.md#auth-verify-mfa) | Public |
+| GET | `/v1/users/self/mfa` | `client.auth.listMfaMethods` | [Request](API_REFERENCE.md#auth-list-mfa-methods) | [Unwrapped response](API_REFERENCE.md#auth-list-mfa-methods) | Bearer / API key |
+| POST | `/v1/users/self/mfa/totp` | `client.auth.startTotp` | [Request](API_REFERENCE.md#auth-start-totp) | [Unwrapped response](API_REFERENCE.md#auth-start-totp) | Bearer / API key |
+| PUT | `/v1/users/self/mfa/totp/confirm` | `client.auth.confirmTotp` | [Request](API_REFERENCE.md#auth-confirm-totp) | [Unwrapped response](API_REFERENCE.md#auth-confirm-totp) | Bearer / API key |
+| POST | `/v1/users/self/mfa/recovery-codes` | `client.auth.regenerateRecoveryCodes` | [Request](API_REFERENCE.md#auth-regenerate-recovery-codes) | [Unwrapped response](API_REFERENCE.md#auth-regenerate-recovery-codes) | Bearer / API key |
+| DELETE | `/v1/users/self/mfa/{customId}` | `client.auth.deleteMfaMethod` | [Request](API_REFERENCE.md#auth-delete-mfa-method) | [Unwrapped response](API_REFERENCE.md#auth-delete-mfa-method) | Bearer / API key |
 | PUT | `/v1/authentication/request-password-reset` | `client.auth.requestPasswordReset` | [Request](API_REFERENCE.md#auth-request-password-reset) | [Unwrapped response](API_REFERENCE.md#auth-request-password-reset) | Public |
 | PUT | `/v1/authentication/reset-password` | `client.auth.resetPassword` | [Request](API_REFERENCE.md#auth-reset-password) | [Unwrapped response](API_REFERENCE.md#auth-reset-password) | Public |
 | PUT | `/v1/authentication/change-password` | `client.auth.changePassword` | [Request](API_REFERENCE.md#auth-change-password) | [Unwrapped response](API_REFERENCE.md#auth-change-password) | Bearer / API key |
@@ -195,6 +201,13 @@ it at the host root. The SDK derives that origin from the configured `baseUrl`.
 
 | Method | Path | SDK method | Request | SDK response | Auth |
 | --- | --- | --- | --- | --- | --- |
+| GET | `/v1/accounts/{accountId}/webhooks/endpoints` | `client.webhooks.listEndpoints` | [Request](API_REFERENCE.md#webhooks-list-endpoints) | [Unwrapped response](API_REFERENCE.md#webhooks-list-endpoints) | Bearer / API key |
+| POST | `/v1/accounts/{accountId}/webhooks/endpoints` | `client.webhooks.createEndpoint` | [Request](API_REFERENCE.md#webhooks-create-endpoint) | [Unwrapped response](API_REFERENCE.md#webhooks-create-endpoint) | Bearer / API key |
+| GET | `/v1/accounts/{accountId}/webhooks/endpoints/{endpointId}` | `client.webhooks.getEndpoint` | [Request](API_REFERENCE.md#webhooks-get-endpoint) | [Unwrapped response](API_REFERENCE.md#webhooks-get-endpoint) | Bearer / API key |
+| PUT | `/v1/accounts/{accountId}/webhooks/endpoints/{endpointId}` | `client.webhooks.updateEndpoint` | [Request](API_REFERENCE.md#webhooks-update-endpoint) | [Unwrapped response](API_REFERENCE.md#webhooks-update-endpoint) | Bearer / API key |
+| DELETE | `/v1/accounts/{accountId}/webhooks/endpoints/{endpointId}` | `client.webhooks.deleteEndpoint` | [Request](API_REFERENCE.md#webhooks-delete-endpoint) | [Unwrapped response](API_REFERENCE.md#webhooks-delete-endpoint) | Bearer / API key |
+| GET | `/v1/accounts/{accountId}/webhooks/endpoints/{endpointId}/secret` | `client.webhooks.getEndpointSecret` | [Request](API_REFERENCE.md#webhooks-get-endpoint-secret) | [Unwrapped response](API_REFERENCE.md#webhooks-get-endpoint-secret) | Bearer / API key (not OAuth) |
+| POST | `/v1/accounts/{accountId}/webhooks/endpoints/{endpointId}/secret/rotate` | `client.webhooks.rotateEndpointSecret` | [Request](API_REFERENCE.md#webhooks-rotate-endpoint-secret) | [Unwrapped response](API_REFERENCE.md#webhooks-rotate-endpoint-secret) | Bearer / API key (not OAuth) |
 | GET | `/v1/accounts/{accountId}/webhooks/subscriptions` | `client.webhooks.getSubscription` | [Request](API_REFERENCE.md#webhooks-get-subscription) | [Unwrapped response](API_REFERENCE.md#webhooks-get-subscription) | Bearer / API key |
 | PUT | `/v1/accounts/{accountId}/webhooks/subscriptions` | `client.webhooks.updateSubscription` | [Request](API_REFERENCE.md#webhooks-update-subscription) | [Unwrapped response](API_REFERENCE.md#webhooks-update-subscription) | Bearer / API key |
 | PUT | `/v1/accounts/{accountId}/webhooks/inactivate` | `client.webhooks.inactivate` | [Request](API_REFERENCE.md#webhooks-inactivate) | [Unwrapped response](API_REFERENCE.md#webhooks-inactivate) | Bearer / API key |

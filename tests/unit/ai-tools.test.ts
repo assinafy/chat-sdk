@@ -65,6 +65,11 @@ function fakeClient(): AssinafyClient {
       setForDocument: vi.fn().mockResolvedValue([{ id: "tag1", name: "x" }]),
     },
     webhooks: {
+      listEndpoints: vi.fn().mockResolvedValue([]),
+      getEndpoint: vi.fn().mockResolvedValue({ id: "ep1" }),
+      createEndpoint: vi.fn().mockResolvedValue({ id: "ep1" }),
+      updateEndpoint: vi.fn().mockResolvedValue({ id: "ep1" }),
+      deleteEndpoint: vi.fn().mockResolvedValue(undefined),
       getSubscription: vi.fn().mockResolvedValue(null),
       updateSubscription: vi.fn().mockResolvedValue({
         events: ["document_ready"],
@@ -118,6 +123,13 @@ describe("createChatTools", () => {
     expect(names).toContain("update_webhook_subscription");
     expect(names).toContain("inactivate_webhook_subscription");
     expect(names).toContain("list_webhook_event_types");
+    for (const name of [
+      "list_webhook_endpoints",
+      "get_webhook_endpoint",
+      "create_webhook_endpoint",
+      "update_webhook_endpoint",
+      "delete_webhook_endpoint",
+    ]) expect(names).toContain(name);
     expect(names).toContain("list_webhook_dispatches");
     expect(names).toContain("retry_webhook_dispatch");
     expect(names).toContain("send_public_token");
@@ -213,6 +225,19 @@ describe("createChatTools", () => {
     expect(input).not.toHaveProperty("unexpected");
   });
 
+  it("allowlists the webhook endpoint payload sent by the AI tool", async () => {
+    const client = fakeClient();
+    const tools = createChatTools(client);
+    await runTool(tools, "update_webhook_endpoint", {
+      endpointId: "ep1",
+      is_active: false,
+      unexpected: "do-not-send",
+    });
+
+    expect((client.webhooks.updateEndpoint as ReturnType<typeof vi.fn>).mock.calls[0]?.slice(1))
+      .toEqual(["ep1", { is_active: false }]);
+  });
+
   it("runTool rejects unknown tool names", async () => {
     const tools = createChatTools(fakeClient());
     await expect(runTool(tools, "no_such_tool", {})).rejects.toThrow(/unknown tool/);
@@ -277,6 +302,16 @@ describe("createChatTools", () => {
         email: "ops@example.com",
       },
       inactivate_webhook_subscription: {},
+      list_webhook_endpoints: {},
+      get_webhook_endpoint: { endpointId: "ep1" },
+      create_webhook_endpoint: {
+        url: "https://example.com/webhook",
+        email: "ops@example.com",
+        events: ["document_ready"],
+        signing_enabled: true,
+      },
+      update_webhook_endpoint: { endpointId: "ep1", is_active: false },
+      delete_webhook_endpoint: { endpointId: "ep1" },
       list_webhook_event_types: {},
       list_webhook_dispatches: {},
       retry_webhook_dispatch: { dispatchId: "wh1" },

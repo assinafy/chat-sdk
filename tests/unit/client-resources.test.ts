@@ -311,6 +311,70 @@ describe("AssinafyClient resource paths", () => {
     expect(new URL(requests[4]!.url).searchParams.get("delivered")).toBe("false");
   });
 
+  it("covers webhook endpoint and signing-secret paths", async () => {
+    const { client, requests } = makeClient([[], {}, {}, {}, [], {}, {}, []]);
+    const input = {
+      url: "https://example.com/webhook",
+      email: "ops@example.com",
+      events: ["document_ready"],
+      signing_enabled: true,
+    };
+
+    await client.webhooks.listEndpoints("acct");
+    await client.webhooks.createEndpoint("acct", input);
+    await client.webhooks.getEndpoint("acct", "ep 1");
+    await client.webhooks.updateEndpoint("acct", "ep 1", { is_active: false });
+    await expect(client.webhooks.deleteEndpoint("acct", "ep 1")).resolves.toBeUndefined();
+    await client.webhooks.getEndpointSecret("acct", "ep 1");
+    await client.webhooks.rotateEndpointSecret("acct", "ep 1");
+    await client.webhooks.listDispatches("acct", { endpoint_id: "ep 1" });
+
+    expect(requests.map((r) => `${r.method} ${new URL(r.url).pathname}`)).toEqual([
+      "GET /v1/accounts/acct/webhooks/endpoints",
+      "POST /v1/accounts/acct/webhooks/endpoints",
+      "GET /v1/accounts/acct/webhooks/endpoints/ep%201",
+      "PUT /v1/accounts/acct/webhooks/endpoints/ep%201",
+      "DELETE /v1/accounts/acct/webhooks/endpoints/ep%201",
+      "GET /v1/accounts/acct/webhooks/endpoints/ep%201/secret",
+      "POST /v1/accounts/acct/webhooks/endpoints/ep%201/secret/rotate",
+      "GET /v1/accounts/acct/webhooks",
+    ]);
+    expect(requests[1]!.body).toEqual(input);
+    expect(requests[3]!.body).toEqual({ is_active: false });
+    expect(new URL(requests[7]!.url).searchParams.get("endpoint_id")).toBe("ep 1");
+  });
+
+  it("covers two-factor login and enrollment paths", async () => {
+    const { client, requests } = makeClient([{ mfa_token: "t" }, {}, {}, {}, {}, {}, {}, { is_mfa_enabled: false }]);
+
+    await expect(client.auth.login({ email: "user@example.com", password: "pw" })).resolves.toEqual({ mfa_token: "t" });
+    await client.auth.verifyMfa({ mfa_token: "t", code: "123456" });
+    await client.auth.listMfaMethods();
+    await client.auth.startTotp();
+    await client.auth.startTotp("My phone");
+    await client.auth.confirmTotp({ id: "m1", code: "123456" });
+    await client.auth.regenerateRecoveryCodes({ password: "pw" });
+    await expect(client.auth.deleteMfaMethod("m 1", { code: "ABCD-EFGH-JKMN" }))
+      .resolves.toEqual({ is_mfa_enabled: false });
+
+    expect(requests.map((r) => `${r.method} ${new URL(r.url).pathname}`)).toEqual([
+      "POST /v1/login",
+      "POST /v1/authentication/mfa/verify",
+      "GET /v1/users/self/mfa",
+      "POST /v1/users/self/mfa/totp",
+      "POST /v1/users/self/mfa/totp",
+      "PUT /v1/users/self/mfa/totp/confirm",
+      "POST /v1/users/self/mfa/recovery-codes",
+      "DELETE /v1/users/self/mfa/m%201",
+    ]);
+    expect(requests[1]!.body).toEqual({ mfa_token: "t", code: "123456" });
+    expect(requests[3]!.body).toEqual({});
+    expect(requests[4]!.body).toEqual({ label: "My phone" });
+    expect(requests[6]!.body).toEqual({ password: "pw" });
+    expect(requests[7]!.body).toEqual({ code: "ABCD-EFGH-JKMN" });
+    expect(new Headers(requests[7]!.init.headers).get("content-type")).toBe("application/json");
+  });
+
   it("covers signer-facing document and multi-sign endpoints", async () => {
     const { client, requests } = makeClient([{}, [], {}, {}, new Response("pdf")]);
 

@@ -136,6 +136,74 @@ export interface LoginResponse {
   expires_at?: string;
 }
 
+/**
+ * Second-factor challenge returned by login when the user has two-factor
+ * authentication enabled. Pass `mfa_token` to `auth.verifyMfa` within five
+ * minutes; it is single-use.
+ */
+export interface MfaChallenge {
+  mfa_token: string;
+}
+
+/** `POST /authentication/mfa/verify` request. */
+export interface VerifyMfaInput {
+  mfa_token: string;
+  /** A 6-digit authenticator code or a recovery code such as `ABCD-EFGH-JKMN`. */
+  code: string;
+}
+
+/**
+ * Re-authentication proof for sensitive two-factor operations: the current
+ * password, a live authenticator code, or an unused recovery code (which is
+ * then consumed). Send one.
+ */
+export interface MfaReauthInput {
+  password?: string;
+  code?: string;
+}
+
+/** One enrolled two-factor method. */
+export interface MfaMethod {
+  id: string;
+  /** Currently always `Totp`. */
+  type: "Totp" | (string & {});
+  label: string | null;
+  confirmed_at: string | null;
+  last_used_at: string | null;
+}
+
+/** `GET /users/self/mfa` response. */
+export interface MfaMethods {
+  methods: MfaMethod[];
+  recovery_codes_remaining: number;
+}
+
+/** `POST /users/self/mfa/totp` response. `secret` is returned only once. */
+export interface TotpEnrollment {
+  id: string;
+  secret: string;
+  /** `otpauth://` URI to render as a QR code. */
+  provisioning_uri: string;
+}
+
+/**
+ * `PUT /users/self/mfa/totp/confirm` request. `password` or `reauth_code` is
+ * required only when the confirmation replaces an already-confirmed method.
+ */
+export interface ConfirmTotpInput {
+  id: string;
+  /** Live code from the device being enrolled. */
+  code: string;
+  password?: string;
+  /** Live code from the current device, or an unused recovery code. */
+  reauth_code?: string;
+}
+
+/** Recovery codes, shown only once. */
+export interface RecoveryCodes {
+  recovery_codes: string[];
+}
+
 /** Social-provider login request. */
 export interface SocialLoginInput {
   provider: string;
@@ -903,6 +971,41 @@ export type WebhookEventType =
   | "template_processing_failed"
   | (string & {});
 
+/** `POST /accounts/{accountId}/webhooks/endpoints` request. */
+export interface CreateWebhookEndpointInput {
+  url: string;
+  /** Contact address for delivery-failure notices. */
+  email: string;
+  events: WebhookEventType[];
+  name?: string;
+  /** Defaults to `true`. */
+  is_active?: boolean;
+  /** Sign deliveries with a Standard Webhooks signature. Defaults to `false`. */
+  signing_enabled?: boolean;
+}
+
+/** `PUT /accounts/{accountId}/webhooks/endpoints/{endpointId}` request — only the fields sent change. */
+export type UpdateWebhookEndpointInput = Partial<CreateWebhookEndpointInput>;
+
+/** A URL that receives the account's webhook events. */
+export interface WebhookEndpoint {
+  id: string;
+  name: string | null;
+  url: string;
+  email: string;
+  events: WebhookEventType[];
+  is_active: boolean;
+  /** Whether deliveries carry a `webhook-signature` header. */
+  signing_enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/** An endpoint's Standard Webhooks signing secret: `whsec_` + base64 key. */
+export interface WebhookEndpointSecret {
+  secret: string;
+}
+
 /** Webhook subscription upsert request. */
 export interface WebhookSubscriptionInput {
   events: WebhookEventType[];
@@ -937,6 +1040,8 @@ export interface WebhookDispatch {
   event: WebhookEventType;
   activity_id: number;
   endpoint: string | null;
+  /** Webhook endpoint the attempt was sent to. */
+  endpoint_id?: string | null;
   payload: Record<string, unknown> | null;
   delivered: boolean;
   http_status: number | null;
@@ -950,6 +1055,8 @@ export interface WebhookDispatch {
 
 /** Webhook dispatch list query. */
 export interface ListWebhookDispatchesQuery {
+  /** Only attempts sent to this webhook endpoint. */
+  endpoint_id?: string;
   event?: WebhookEventType;
   delivered?: boolean | "true" | "false";
   from?: number;

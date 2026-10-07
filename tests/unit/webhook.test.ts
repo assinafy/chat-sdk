@@ -3,6 +3,7 @@ import { createHmac } from "node:crypto";
 import {
   verifyWebhookSignature,
   isValidWebhookSignature,
+  verifyStandardWebhook,
 } from "../../src/adapters/webhook.js";
 import { WebhookSignatureError } from "../../src/client/errors.js";
 
@@ -114,5 +115,46 @@ describe("verifyWebhookSignature", () => {
     payload.set(raw, prefix.length);
     const sig = createHmac("sha256", secret).update(payload).digest("hex");
     expect(verifyWebhookSignature({ secret, body: raw, signature: sig, timestamp: ts })).toBe(true);
+  });
+});
+
+describe("verifyStandardWebhook", () => {
+  const key = Buffer.from("assinafy-test-signing-key-32byte");
+  const secret = `whsec_${key.toString("base64")}`;
+  const id = "9f86d081884c7d659a2feaa0c55ad015";
+  const body = `{"event":"document_ready","account_id":"acct"}`;
+  const now = () => String(Math.floor(Date.now() / 1000));
+  const sign = (timestamp: string, content = body) =>
+    `v1,${createHmac("sha256", key).update(`${id}.${timestamp}.${content}`).digest("base64")}`;
+
+  it("accepts a matching v1 entry among several, for string and byte bodies", () => {
+    const timestamp = now();
+    const signature = `v1,AAAA v2,${sign(timestamp).slice(3)} ${sign(timestamp)}`;
+    expect(verifyStandardWebhook({ secret, id, timestamp, body, signature })).toBe(true);
+    expect(verifyStandardWebhook({
+      secret, id, timestamp: Number(timestamp), body: new TextEncoder().encode(body), signature,
+    })).toBe(true);
+  });
+
+  it("rejects tampering, a rotated secret, replays and malformed input", () => {
+    const timestamp = now();
+    const signature = sign(timestamp);
+    const other = `whsec_${Buffer.from("another-key").toString("base64")}`;
+    const stale = String(Number(timestamp) - 301);
+    const cases = [
+      { secret, id, timestamp, body: `${body} `, signature },
+      { secret: other, id, timestamp, body, signature },
+      { secret, id: "other", timestamp, body, signature },
+      { secret, id, timestamp: stale, body, signature: sign(stale) },
+      { secret, id, timestamp: "", body, signature },
+      { secret, id: "", timestamp, body, signature },
+      { secret: "", id, timestamp, body, signature },
+      { secret: "whsec_", id, timestamp, body, signature },
+      { secret, id, timestamp, body, signature: "v1," },
+      { secret, id, timestamp, body, signature, toleranceSeconds: -1 },
+    ];
+    for (const options of cases) {
+      expect(() => verifyStandardWebhook(options)).toThrow(WebhookSignatureError);
+    }
   });
 });

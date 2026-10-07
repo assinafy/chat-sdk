@@ -23,7 +23,7 @@ de chat, cards e IA. Cada seção assume a anterior.
 
 O SDK é um pacote com duas metades que podem ser usadas de forma independente.
 
-**O cliente da API** cobre a API REST Assinafy v1: **93 operações em 71
+**O cliente da API** cobre a API REST Assinafy v1: **106 operações em 81
 caminhos**, agrupadas em doze recursos — contas, autenticação, OAuth, usuários,
 signatários, documentos, tags, templates, assignments, campos, o fluxo de
 assinatura do signatário e webhooks. Toda operação é tipada, e o transporte
@@ -35,7 +35,7 @@ orquestrador `Chat` que roteia mensagens de entrada para handlers, uma visão
 `Thread` entregue a cada handler, um contrato de adapter para conectar
 plataformas de mensagem, um contrato de estado plugável para assinaturas e
 armazenamento por thread, um sistema declarativo de cards com renderizadores de
-texto, Markdown e HTML, e 36 descritores de ferramenta neutros de provedor para
+texto, Markdown e HTML, e 41 descritores de ferramenta neutros de provedor para
 tool calling de LLM.
 
 Dois documentos de referência acompanham este e vão mais fundo:
@@ -44,7 +44,7 @@ Dois documentos de referência acompanham este e vão mais fundo:
   modo de autenticação, payloads completos de requisição e resposta, as
   superfícies de chat, card, adapter e estado, e o catálogo completo de
   ferramentas de IA.
-- **[Índice de operações](./docs/API_COVERAGE.md)** — as 93 operações publicadas
+- **[Índice de operações](./docs/API_COVERAGE.md)** — as 106 operações publicadas
   mapeadas ao método do SDK, mais os pontos em que a superfície HTTP do SDK vai
   além do documento publicado.
 
@@ -131,6 +131,27 @@ os exemplos e a suíte de testes usam:
 | `ASSINAFY_ACCESS_TOKEN` | nenhum | Token bearer, usado no lugar da chave de API |
 | `ASSINAFY_BASE_URL` | `https://api.assinafy.com.br/v1` | Use `https://sandbox.assinafy.com.br/v1` para o sandbox |
 | `ASSINAFY_ACCOUNT_ID` | nenhum | ID de conta padrão, legível de volta em `client.accountId` |
+
+Com autenticação em dois fatores ativa, `auth.login()` devolve
+`{ mfa_token }` em vez da sessão. Conclua em até cinco minutos com o código do
+aplicativo autenticador ou um código de recuperação:
+
+```ts
+const result = await client.auth.login({ email, password });
+const session = "mfa_token" in result
+  ? await client.auth.verifyMfa({ mfa_token: result.mfa_token, code })
+  : result;
+```
+
+O cadastro do autenticador é `auth.startTotp()` (devolve o segredo e a URI
+`otpauth://` uma única vez) seguido de `auth.confirmTotp()` (devolve os códigos
+de recuperação, também uma única vez). `listMfaMethods`,
+`regenerateRecoveryCodes` e `deleteMfaMethod` completam o ciclo; os dois últimos
+exigem a senha, um código do autenticador ou um código de recuperação.
+
+> **Migrando para a 2.4.0.** `auth.login()` passa a ser tipado como
+> `LoginResponse | MfaChallenge`. Código que lê `access_token` direto precisa
+> antes estreitar com `"mfa_token" in result`, como no exemplo acima.
 
 Construir sem credencial nenhuma é **deliberado e suportado**: um cliente não
 autenticado é o que você usa para `auth.login()`, para verificação pública de
@@ -275,7 +296,7 @@ Cinco regras decidem se uma integração OAuth é confiável:
 | `documents:write` | Criar documentos e enviá-los para assinatura — consome créditos de notificação |
 | `templates:read` / `templates:write` | Ler / gerenciar templates |
 | `account:read` | Ler o nome e as configurações da conta |
-| `webhooks:write` | Configurar e desativar a assinatura de webhooks da conta |
+| `webhooks:write` | Criar, alterar e excluir endpoints de webhook da conta |
 | `openid`, `profile`, `email` | Identificar a pessoa; `oauth.getUserInfo()` devolve os claims |
 | `offline_access` | Receber um refresh token |
 
@@ -643,43 +664,59 @@ carregam **todas** as tags listadas.
 
 ### Webhooks substituem o polling
 
-Uma conta tem uma inscrição de webhook. Aponte-a para seu endpoint, liste os
-eventos que interessam, e a Assinafy entrega cada um:
+Uma conta tem 1 endpoint de webhook, ou até 3 nos planos pagos. Cada endpoint
+tem URL, eventos e assinatura próprios, e todo endpoint ativo inscrito num
+evento o recebe, de forma independente. Crie um com assinatura habilitada:
 
 ```ts
-await client.webhooks.updateSubscription(accountId, {
-  events: ["document_ready", "signer_signed_document", "document_processing_failed"],
-  is_active: true,
+const endpoint = await client.webhooks.createEndpoint(accountId, {
+  name: "ERP",
   url: "https://example.com/hooks/assinafy",
   email: "ops@example.test",
+  events: ["document_ready", "signer_signed_document", "document_processing_failed"],
+  signing_enabled: true,
 });
+const { secret } = await client.webhooks.getEndpointSecret(accountId, endpoint.id); // "whsec_…"
 ```
+
+Passar do limite do plano responde `403`; repetir a `url` de outro endpoint da
+conta responde `400`. `listEndpoints`, `getEndpoint`, `updateEndpoint` (envia
+só os campos informados) e `deleteEndpoint` completam o ciclo.
+`rotateEndpointSecret` troca o segredo e o antigo para de valer na hora. Os dois
+métodos de segredo exigem chave de API ou token de usuário — aplicações OAuth
+não os acessam. `updateSubscription`, `getSubscription` e `inactivate` continuam
+funcionando e agem sobre o endpoint **mais antigo** da conta.
 
 `client.webhooks.listEventTypes()` enumera todo evento suportado com sua
-descrição. Quando uma entrega falha, `listDispatches()` mostra o histórico de
-tentativas com o status HTTP e o corpo da resposta, e `retryDispatch()` reenvia
-uma. `inactivate()` interrompe a entrega preservando a URL e a seleção de
-eventos — a API não expõe exclusão real de uma inscrição.
+descrição. Quando uma entrega falha, `listDispatches(accountId, { endpoint_id })`
+mostra o histórico de tentativas com o status HTTP e o corpo da resposta, e
+`retryDispatch()` reenvia uma.
 
-Verifique cada entrega antes de confiar nela. O SDK traz as primitivas de HMAC,
-de modo que um adapter só escreve o parsing de cabeçalho da sua plataforma:
+Verifique cada entrega antes de confiar nela. As entregas seguem o padrão
+[Standard Webhooks](https://www.standardwebhooks.com): cabeçalhos `webhook-id`,
+`webhook-timestamp` e `webhook-signature`, HMAC-SHA256 sobre
+`{id}.{timestamp}.{corpo}`.
 
 ```ts
-import { verifyWebhookSignature } from "@assinafy/chat-sdk/adapters";
+import { verifyStandardWebhook } from "@assinafy/chat-sdk/adapters";
 
-verifyWebhookSignature({
-  secret: process.env.WEBHOOK_SECRET!,
-  body: corpoCruDaRequisicao,   // os bytes crus, antes do parse de JSON
-  signature: request.headers["x-signature"] as string,
-  timestamp: request.headers["x-timestamp"] as string, // habilita proteção contra replay
+verifyStandardWebhook({
+  secret,                                  // "whsec_…"
+  id: request.headers["webhook-id"] as string,
+  timestamp: request.headers["webhook-timestamp"] as string,
+  signature: request.headers["webhook-signature"] as string,
+  body: corpoCruDaRequisicao,              // os bytes crus, antes do parse de JSON
 });
 ```
 
-Ela lança `WebhookSignatureError` em divergência, assinatura malformada,
-segredo ausente ou timestamp fora da janela de tolerância — cinco minutos por
-padrão. `isValidWebhookSignature()` é a mesma checagem devolvendo um booleano. A
-assinatura precisa ser calculada sobre o corpo cru: fazer parse e re-serializar
-o JSON antes muda os bytes e quebra a verificação.
+Ela lança `WebhookSignatureError` em divergência, segredo ausente ou timestamp
+fora da janela de tolerância — cinco minutos por padrão; responda `401`. Use
+`webhook-id` para descartar entregas duplicadas: ele se repete em toda
+tentativa do mesmo evento para o mesmo endpoint. A assinatura é calculada sobre
+o corpo cru: fazer parse e re-serializar o JSON muda os bytes e quebra a
+verificação. Para webhooks de outras plataformas (Slack, Stripe e similares),
+`verifyWebhookSignature()` e `isValidWebhookSignature()` cobrem HMAC
+hexadecimal ou base64 com prefixo de timestamp.
 
 ### O fluxo do signatário
 
@@ -850,7 +887,7 @@ modo que uma URL hostil no nome de um documento não vire execução de script.
 
 ## 10. Dirigindo a API a partir de um LLM
 
-`createChatTools(client)` devolve 36 descritores de ferramenta neutros de
+`createChatTools(client)` devolve 41 descritores de ferramenta neutros de
 provedor — as operações de leitura e escrita de que um assistente
 conversacional realmente precisa. Cada descritor carrega um `name`, uma
 `description`, um JSON Schema exposto tanto como `input_schema` (nome do campo

@@ -57,28 +57,9 @@ export function verifyWebhookSignature(options: VerifyWebhookSignatureOptions): 
   const encoding = options.encoding ?? "hex";
   const tolerance = options.toleranceSeconds ?? 300;
 
-  if (!Number.isFinite(tolerance) || tolerance < 0) {
-    throw new WebhookSignatureError("Webhook tolerance must be a non-negative number");
-  }
-
-  // An empty secret makes every signature derivable by an attacker, so a
-  // misconfigured secret must fail closed rather than "verify" forged requests.
-  if (!options.secret) {
-    throw new WebhookSignatureError("Webhook secret is missing or empty");
-  }
-
-  if (options.timestamp !== undefined) {
-    const ts = Number(options.timestamp);
-    if (!Number.isFinite(ts)) {
-      throw new WebhookSignatureError("Webhook timestamp is not a valid number");
-    }
-    const ageSeconds = Math.abs(Date.now() / 1000 - ts);
-    if (ageSeconds > tolerance) {
-      throw new WebhookSignatureError(
-        `Webhook timestamp is outside the ${tolerance}s tolerance window (drift=${Math.round(ageSeconds)}s)`,
-      );
-    }
-  }
+  assertSecret(options.secret);
+  if (options.timestamp !== undefined) assertFresh(options.timestamp, tolerance);
+  else assertTolerance(tolerance);
 
   const payload = options.buildPayload
     ? options.buildPayload(options.timestamp, options.body)
@@ -105,6 +86,78 @@ export function isValidWebhookSignature(options: VerifyWebhookSignatureOptions):
     return verifyWebhookSignature(options);
   } catch {
     return false;
+  }
+}
+
+/** Options for {@link verifyStandardWebhook}. */
+export interface VerifyStandardWebhookOptions {
+  /** The endpoint secret, `whsec_` followed by the base64 key. */
+  secret: string;
+  /** The raw request body, exactly as received. */
+  body: string | Uint8Array;
+  /** The `webhook-id` header. */
+  id: string;
+  /** The `webhook-timestamp` header (Unix seconds). */
+  timestamp: string | number;
+  /** The `webhook-signature` header: space-separated `v1,<base64>` entries. */
+  signature: string;
+  /** Replay-protection window in seconds. Defaults to 300 (5 min). */
+  toleranceSeconds?: number;
+}
+
+/**
+ * Verify an Assinafy webhook delivery signed per the
+ * [Standard Webhooks](https://www.standardwebhooks.com) specification:
+ * HMAC-SHA256 over `{webhook-id}.{webhook-timestamp}.{body}` keyed with the
+ * base64-decoded part of the `whsec_` secret. Accepts the request when any
+ * `v1,` entry matches. Returns `true`; throws {@link WebhookSignatureError}
+ * otherwise.
+ */
+export function verifyStandardWebhook(options: VerifyStandardWebhookOptions): true {
+  assertSecret(options.secret);
+  if (!options.id) throw new WebhookSignatureError("Webhook id is missing");
+  assertFresh(options.timestamp, options.toleranceSeconds ?? 300);
+
+  const key = Buffer.from(options.secret.replace(/^whsec_/, ""), "base64");
+  if (key.length === 0) throw new WebhookSignatureError("Webhook secret is not valid base64");
+  const expected = createHmac("sha256", key)
+    .update(`${options.id}.${options.timestamp}.`)
+    .update(toBytes(options.body))
+    .digest();
+
+  const matches = options.signature.split(" ").some((entry) => {
+    const [version, value] = entry.split(",", 2);
+    if (version !== "v1" || !value) return false;
+    const provided = Buffer.from(value, "base64");
+    return provided.length === expected.length && timingSafeEqual(provided, expected);
+  });
+  if (!matches) throw new WebhookSignatureError("Webhook signature does not match");
+  return true;
+}
+
+function assertSecret(secret: string): void {
+  // An empty secret makes every signature derivable by an attacker, so a
+  // misconfigured secret must fail closed rather than "verify" forged requests.
+  if (!secret) throw new WebhookSignatureError("Webhook secret is missing or empty");
+}
+
+function assertTolerance(tolerance: number): void {
+  if (!Number.isFinite(tolerance) || tolerance < 0) {
+    throw new WebhookSignatureError("Webhook tolerance must be a non-negative number");
+  }
+}
+
+function assertFresh(timestamp: number | string, tolerance: number): void {
+  assertTolerance(tolerance);
+  const ts = Number(timestamp);
+  if (timestamp === "" || !Number.isFinite(ts)) {
+    throw new WebhookSignatureError("Webhook timestamp is not a valid number");
+  }
+  const ageSeconds = Math.abs(Date.now() / 1000 - ts);
+  if (ageSeconds > tolerance) {
+    throw new WebhookSignatureError(
+      `Webhook timestamp is outside the ${tolerance}s tolerance window (drift=${Math.round(ageSeconds)}s)`,
+    );
   }
 }
 

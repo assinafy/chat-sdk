@@ -103,6 +103,8 @@ async function main(): Promise<void> {
       "list_fields",
       "get_field",
       "list_field_types",
+      "list_webhook_endpoints",
+      "get_webhook_endpoint",
       "list_webhook_event_types",
       "list_webhook_dispatches",
       "verify_document",

@@ -3,7 +3,7 @@
 This is the reference for the public surface of `@assinafy/chat-sdk`.
 The REST contracts follow the official OpenAPI document at
 [`https://api.assinafy.com.br/v1/docs/openapi.json`](https://api.assinafy.com.br/v1/docs/openapi.json)
-and the complete 93-operation REST inventory is in the
+and the complete 106-operation REST inventory is in the
 [API operation index](./API_COVERAGE.md).
 
 The client exposes the API operations plus pagination helpers, deprecated
@@ -178,7 +178,8 @@ created by `AssinafyClient`.
 
 | SDK method | HTTP operation | Auth | Request | Unwrapped SDK response |
 | --- | --- | --- | --- | --- |
-| <a id="auth-login"></a>`auth.login(input)` | `POST /login` | public | [`LoginInput`](#login-request) | [`LoginResponse`](#login-response) |
+| <a id="auth-login"></a>`auth.login(input)` | `POST /login` | public | [`LoginInput`](#login-request) | [`LoginResponse \| MfaChallenge`](#login-response) |
+| <a id="auth-verify-mfa"></a>`auth.verifyMfa(input)` | `POST /authentication/mfa/verify` | public | [`VerifyMfaInput`](#mfa-verify-request) | [`LoginResponse`](#login-response) |
 | <a id="auth-social-login"></a>`auth.socialLogin(input)` | `POST /authentication/social-login` | public | [`SocialLoginInput`](#social-login-request) | [`LoginResponse`](#login-response) |
 | <a id="auth-link-social-login"></a>`auth.linkSocialLogin(input)` | `POST /auth/link-social-login` | account | [`LinkSocialLoginInput`](#link-social-login-request) | [`void`](#unwrapped-json-pagination-raw-responses-and-void) |
 | <a id="auth-create-api-key"></a>`auth.createApiKey(password)` | `POST /users/api-keys` | account | [`{ password }`](#api-key-create-request) | [`ApiKeyRecord`](#api-key-response) |
@@ -189,8 +190,22 @@ created by `AssinafyClient`.
 | <a id="auth-change-password"></a>`auth.changePassword(input)` | `PUT /authentication/change-password` | account | [`ChangePasswordInput`](#change-password-request) | [`EmailResult`](#email-result-response) |
 | <a id="auth-request-password-reset"></a>`auth.requestPasswordReset(input)` | `PUT /authentication/request-password-reset` | public | [`RequestPasswordResetInput`](#password-reset-requests) | [`EmailResult`](#email-result-response) |
 | <a id="auth-reset-password"></a>`auth.resetPassword(input)` | `PUT /authentication/reset-password` | public | [`ResetPasswordInput`](#password-reset-requests) | [`EmailResult`](#email-result-response) |
+| <a id="auth-list-mfa-methods"></a>`auth.listMfaMethods()` | `GET /users/self/mfa` | account | path/query only | [`MfaMethods`](#mfa-methods-response) |
+| <a id="auth-start-totp"></a>`auth.startTotp(label?)` | `POST /users/self/mfa/totp` | account | [`{ label? }`](#totp-enrollment) | [`TotpEnrollment`](#totp-enrollment) |
+| <a id="auth-confirm-totp"></a>`auth.confirmTotp(input)` | `PUT /users/self/mfa/totp/confirm` | account | [`ConfirmTotpInput`](#totp-confirmation) | [`RecoveryCodes`](#totp-confirmation) |
+| <a id="auth-regenerate-recovery-codes"></a>`auth.regenerateRecoveryCodes(proof)` | `POST /users/self/mfa/recovery-codes` | account | [`MfaReauthInput`](#mfa-re-authentication) | [`RecoveryCodes`](#totp-confirmation) |
+| <a id="auth-delete-mfa-method"></a>`auth.deleteMfaMethod(methodId, proof)` | `DELETE /users/self/mfa/{methodId}` | account | [`MfaReauthInput`](#mfa-re-authentication) | [`{ is_mfa_enabled }`](#mfa-re-authentication) |
 
 The documented social-login provider is `google`.
+
+When the user has two-factor authentication, `login` resolves to an
+[`MfaChallenge`](#login-response) instead of a session; narrow with
+`"mfa_token" in result` and call `verifyMfa` within five minutes. The MFA
+enrollment methods act on the authenticated user, so they need a user's bearer
+token or API key, never an OAuth application's token.
+
+**Migrating to 2.4.0.** `login` is typed `LoginResponse | MfaChallenge`; narrow
+before reading `access_token`.
 
 ### OAuth
 
@@ -353,6 +368,19 @@ All signer-code examples use a placeholder. Treat the real value as a secret.
 | <a id="webhooks-list-event-types"></a>`webhooks.listEventTypes()` | `GET /webhooks/event-types` | account | path/query only | [`WebhookEventTypeInfo[]`](#webhook-event-type-response) |
 | <a id="webhooks-list-dispatches"></a>`webhooks.listDispatches(accountId, query?)` | `GET /accounts/{accountId}/webhooks` | account | [`ListWebhookDispatchesQuery`](#webhook-dispatch-list-query) | [`Page<WebhookDispatch>`](#webhook-dispatch-response) |
 | <a id="webhooks-retry-dispatch"></a>`webhooks.retryDispatch(accountId, dispatchId)` | `POST /accounts/{accountId}/webhooks/{historyId}/retry` | account | path/query only | [`WebhookDispatch`](#webhook-dispatch-response) |
+| <a id="webhooks-list-endpoints"></a>`webhooks.listEndpoints(accountId)` | `GET /accounts/{accountId}/webhooks/endpoints` | account | path/query only | [`WebhookEndpoint[]`](#webhook-endpoint-response) |
+| <a id="webhooks-create-endpoint"></a>`webhooks.createEndpoint(accountId, input)` | `POST /accounts/{accountId}/webhooks/endpoints` | account | [`CreateWebhookEndpointInput`](#webhook-endpoint-request) | [`WebhookEndpoint`](#webhook-endpoint-response) |
+| <a id="webhooks-get-endpoint"></a>`webhooks.getEndpoint(accountId, endpointId)` | `GET /accounts/{accountId}/webhooks/endpoints/{endpointId}` | account | path/query only | [`WebhookEndpoint`](#webhook-endpoint-response) |
+| <a id="webhooks-update-endpoint"></a>`webhooks.updateEndpoint(accountId, endpointId, input)` | `PUT /accounts/{accountId}/webhooks/endpoints/{endpointId}` | account | [`UpdateWebhookEndpointInput`](#webhook-endpoint-request) | [`WebhookEndpoint`](#webhook-endpoint-response) |
+| <a id="webhooks-delete-endpoint"></a>`webhooks.deleteEndpoint(accountId, endpointId)` | `DELETE /accounts/{accountId}/webhooks/endpoints/{endpointId}` | account | path/query only | [`void`](#unwrapped-json-pagination-raw-responses-and-void) |
+| <a id="webhooks-get-endpoint-secret"></a>`webhooks.getEndpointSecret(accountId, endpointId)` | `GET /accounts/{accountId}/webhooks/endpoints/{endpointId}/secret` | account, not OAuth | path/query only | [`WebhookEndpointSecret`](#webhook-endpoint-secret-response) |
+| <a id="webhooks-rotate-endpoint-secret"></a>`webhooks.rotateEndpointSecret(accountId, endpointId)` | `POST /accounts/{accountId}/webhooks/endpoints/{endpointId}/secret/rotate` | account, not OAuth | path/query only | [`WebhookEndpointSecret`](#webhook-endpoint-secret-response) |
+
+An account has 1 webhook endpoint, or up to 3 on paid plans; creating one past
+the limit answers `403`, and two endpoints of one account cannot share a `url`
+(`400`). Every active endpoint subscribed to an event receives it,
+independently. The `subscription` and `inactivate` methods act on the
+account's **oldest** endpoint and remain for single-endpoint integrations.
 
 ## Request and response payloads
 
@@ -559,6 +587,109 @@ provider value is `google`.
 ```
 
 `expires_at` is optional.
+
+With two-factor authentication enabled, `login` resolves to an `MfaChallenge`
+instead:
+
+```json
+{
+  "mfa_token": "single-use-challenge-token"
+}
+```
+
+The API documents only `mfa_token` for this response; treat any other field as
+informational.
+
+#### MFA verify request
+
+```json
+{
+  "mfa_token": "single-use-challenge-token",
+  "code": "123456"
+}
+```
+
+`code` is a 6-digit authenticator code or an unused recovery code such as
+`ABCD-EFGH-JKMN`. A wrong or used code answers `400`; an expired, used, or
+brute-forced challenge answers `401`. The response is a
+[`LoginResponse`](#login-response).
+
+#### MFA methods response
+
+```json
+{
+  "methods": [
+    {
+      "id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+      "type": "Totp",
+      "label": "My phone",
+      "confirmed_at": "2026-09-09T14:21:03Z",
+      "last_used_at": "2026-09-09T18:02:44Z"
+    }
+  ],
+  "recovery_codes_remaining": 8
+}
+```
+
+#### TOTP enrollment
+
+`startTotp("My phone")` sends `{ "label": "My phone" }` (or `{}` without a
+label) and returns the shared secret once:
+
+```json
+{
+  "id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+  "secret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+  "provisioning_uri": "otpauth://totp/owner%40example.test?issuer=Assinafy&secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+}
+```
+
+Render `provisioning_uri` as a QR code. Two-factor stays off until confirmed.
+
+#### TOTP confirmation
+
+```json
+{
+  "id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+  "code": "123456"
+}
+```
+
+When the confirmation replaces an already-confirmed method, add `password` or
+`reauth_code` (a live code from the current device, or a recovery code).
+`confirmTotp` and `regenerateRecoveryCodes` both return the codes, shown once:
+
+```json
+{
+  "recovery_codes": ["ABCD-EFGH-JKMN", "PQRS-TUVW-XYZ2"]
+}
+```
+
+#### MFA re-authentication
+
+`regenerateRecoveryCodes` and `deleteMfaMethod` require one proof; a recovery
+code sent here is consumed:
+
+```json
+{
+  "password": "current-password"
+}
+```
+
+```json
+{
+  "code": "123456"
+}
+```
+
+`deleteMfaMethod` returns whether any method remains; removing the last one
+also discards the recovery codes:
+
+```json
+{
+  "is_mfa_enabled": false
+}
+```
 
 #### API key create request
 
@@ -2133,6 +2264,77 @@ The SDK encodes it as `search=contract` alongside the signer access code.
 
 ### Webhook payloads
 
+#### Webhook endpoint request
+
+`createEndpoint` requires `url`, `email`, and `events`; `updateEndpoint` sends
+only the fields given:
+
+```json
+{
+  "url": "https://example.com/webhooks/assinafy",
+  "email": "webhooks@example.test",
+  "events": ["document_ready", "signer_signed_document"],
+  "name": "ERP",
+  "is_active": true,
+  "signing_enabled": true
+}
+```
+
+`is_active` defaults to `true` and `signing_enabled` to `false`. Turning
+`signing_enabled` on keeps an existing secret or creates one; turning it off
+discards the secret.
+
+#### Webhook endpoint response
+
+```json
+{
+  "id": "65f1c2a9b3e4d5f60718293a4b5c6d7e",
+  "name": "ERP",
+  "url": "https://example.com/webhooks/assinafy",
+  "email": "webhooks@example.test",
+  "events": ["document_ready", "signer_signed_document"],
+  "is_active": true,
+  "signing_enabled": true,
+  "created_at": "2026-10-01T12:00:00Z",
+  "updated_at": "2026-10-01T12:00:00Z"
+}
+```
+
+`listEndpoints` returns an array of these, oldest first.
+
+#### Webhook endpoint secret response
+
+```json
+{
+  "secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"
+}
+```
+
+Both secret methods answer `400` when signing is disabled and are refused to
+OAuth applications. Rotation takes effect immediately.
+
+#### Verifying a signed delivery
+
+Each delivery carries `webhook-id` (stable across retries of one event to one
+endpoint — deduplicate on it), `webhook-timestamp` (Unix seconds) and, when
+signing is enabled, `webhook-signature`. `verifyStandardWebhook` (from
+`@assinafy/chat-sdk/adapters`) checks the signature over the **raw** body and
+rejects timestamps more than `toleranceSeconds` (default 300) from the clock:
+
+```ts
+import { verifyStandardWebhook, WebhookSignatureError } from "@assinafy/chat-sdk";
+
+verifyStandardWebhook({
+  secret: process.env.ASSINAFY_WEBHOOK_SECRET!, // "whsec_…"
+  id: req.headers["webhook-id"],
+  timestamp: req.headers["webhook-timestamp"],
+  signature: req.headers["webhook-signature"],
+  body: rawBody, // string or Uint8Array, never re-serialized JSON
+});
+```
+
+It returns `true` or throws `WebhookSignatureError`; answer `401` on the error.
+
 #### Webhook subscription request
 
 ```json
@@ -2168,7 +2370,8 @@ Known event IDs are typed, and the type also accepts new event strings.
 }
 ```
 
-`getSubscription()` returns `null` when no subscription exists. Existing,
+`getSubscription()` and `updateSubscription()` act on the account's oldest
+endpoint. `getSubscription()` returns `null` when no endpoint exists. Existing,
 incompletely configured records can contain `null` for `url`, `email`, or
 `updated_at`.
 
@@ -2191,6 +2394,7 @@ incompletely configured records can contain `null` for `url`, `email`, or
 
 ```json
 {
+  "endpoint_id": "65f1c2a9b3e4d5f60718293a4b5c6d7e",
   "event": "signer_signed_document",
   "delivered": false,
   "from": 1787184000,
@@ -2211,6 +2415,7 @@ incompletely configured records can contain `null` for `url`, `email`, or
   "event": "signer_signed_document",
   "activity_id": 4812,
   "endpoint": "https://example.com/webhooks/assinafy",
+  "endpoint_id": "65f1c2a9b3e4d5f60718293a4b5c6d7e",
   "payload": {
     "document_id": "doc_01J00000000000000000000000",
     "signer_id": "sig_01J00000000000000000000000"
@@ -2444,6 +2649,7 @@ operations. `disconnect()` is optional.
 | `buildIncomingAction(input)` | action fields | complete `IncomingAction`, including the deprecated `from` alias |
 | `verifyWebhookSignature(options)` | secret, raw body, signature, optional timestamp/tolerance/algorithm/encoding/payload builder | literal `true`, or throws `WebhookSignatureError` |
 | `isValidWebhookSignature(options)` | same options | boolean; converts every verification failure to `false` |
+| `verifyStandardWebhook(options)` | `whsec_` secret, raw body, `webhook-id`, `webhook-timestamp`, `webhook-signature`, optional tolerance | literal `true`, or throws `WebhookSignatureError` — see [Verifying a signed delivery](#verifying-a-signed-delivery) |
 
 Signature verification options, with every property shown:
 
@@ -2465,7 +2671,8 @@ Do not parse or reserialize the body before verification. Empty secrets,
 malformed signatures, length mismatches, digest mismatches, invalid timestamps,
 invalid or negative tolerances, and timestamps outside the tolerance fail
 closed. Hex and base64 digests are supported, as are short algorithm prefixes
-such as `v0=` and `sha256=`.
+such as `v0=` and `sha256=`. Assinafy's own deliveries use the Standard
+Webhooks scheme: verify them with `verifyStandardWebhook`, not this helper.
 
 ### Memory adapter
 
@@ -2652,7 +2859,11 @@ account-scoped tool requires `accountId`. `include` and `exclude` filter stable
 tool names. `runTool(tools, name, args)` finds and executes a tool or throws for
 an unknown name. Validation failures throw before any API request.
 
-The full 36-tool catalog follows. Braces show argument keys; keys suffixed `?`
+`getEndpointSecret` and `rotateEndpointSecret` have no tool on purpose: a
+signing secret must not enter a model's context, and a rotation breaks the
+receiver immediately.
+
+The full 41-tool catalog follows. Braces show argument keys; keys suffixed `?`
 are optional. Results link to the same unwrapped payloads as the resource
 methods.
 
@@ -2688,8 +2899,13 @@ methods.
 | `get_webhook_subscription` | `{ accountId? }` | [`WebhookSubscription \| null`](#webhook-subscription-response) |
 | `update_webhook_subscription` | `{ accountId?, events, is_active, url, email }` | [`WebhookSubscription`](#webhook-subscription-response) |
 | `inactivate_webhook_subscription` | `{ accountId? }` | [`WebhookSubscription`](#webhook-subscription-response) |
+| `list_webhook_endpoints` | `{ accountId? }` | [`WebhookEndpoint[]`](#webhook-endpoint-response) |
+| `get_webhook_endpoint` | `{ accountId?, endpointId }` | [`WebhookEndpoint`](#webhook-endpoint-response) |
+| `create_webhook_endpoint` | `{ accountId?, url, email, events, name?, is_active?, signing_enabled? }` | [`WebhookEndpoint`](#webhook-endpoint-response) |
+| `update_webhook_endpoint` | `{ accountId?, endpointId, url?, email?, events?, name?, is_active?, signing_enabled? }` | [`WebhookEndpoint`](#webhook-endpoint-response) |
+| `delete_webhook_endpoint` | `{ accountId?, endpointId }` | `{ ok: true }` |
 | `list_webhook_event_types` | `{}` | [`WebhookEventTypeInfo[]`](#webhook-event-type-response) |
-| `list_webhook_dispatches` | `{ accountId?, event?, delivered?, from?, to?, page?, perPage? }` | [`Page<WebhookDispatch>`](#webhook-dispatch-response) |
+| `list_webhook_dispatches` | `{ accountId?, endpoint_id?, event?, delivered?, from?, to?, page?, perPage? }` | [`Page<WebhookDispatch>`](#webhook-dispatch-response) |
 | `retry_webhook_dispatch` | `{ accountId?, dispatchId }` | [`WebhookDispatch`](#webhook-dispatch-response) |
 | `send_public_token` | `{ documentId, email }` | [`SendPublicTokenResult \| undefined`](#send-public-token-response) |
 | `verify_document` | `{ signatureHash }` | [`DocumentVerificationResult`](#document-verification-response) |

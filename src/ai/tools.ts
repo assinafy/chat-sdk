@@ -22,6 +22,7 @@
 import type { AssinafyClient } from "../client/index.js";
 import type {
   AssignmentMethod,
+  CreateWebhookEndpointInput,
   CreateAssignmentInput,
   CreateFieldInput,
   CreateSignerInput,
@@ -34,6 +35,7 @@ import type {
   TemplateSignerInput,
   UpdateFieldInput,
   UpdateSignerInput,
+  UpdateWebhookEndpointInput,
   ValidateFieldEntry,
   WebhookSubscriptionInput,
 } from "../client/types.js";
@@ -650,7 +652,7 @@ export function createChatTools(
 
     schemaTool({
       name: "get_webhook_subscription",
-      description: "Get the current webhook subscription for an account.",
+      description: "Get the account's oldest webhook endpoint as a subscription.",
       schema: {
         type: "object",
         properties: { accountId: accountIdSchema },
@@ -662,7 +664,7 @@ export function createChatTools(
 
     schemaTool({
       name: "update_webhook_subscription",
-      description: "Create or replace the webhook subscription for an account.",
+      description: "Update the account's oldest webhook endpoint, creating it when none exists.",
       schema: {
         type: "object",
         properties: {
@@ -687,7 +689,7 @@ export function createChatTools(
 
     schemaTool({
       name: "inactivate_webhook_subscription",
-      description: "Inactivate the current webhook subscription without deleting its settings.",
+      description: "Deactivate the account's oldest webhook endpoint without deleting it.",
       schema: {
         type: "object",
         properties: { accountId: accountIdSchema },
@@ -695,6 +697,66 @@ export function createChatTools(
       },
       execute: async (args: { accountId?: string }) =>
         client.webhooks.inactivate(accountIdOrDefault(args.accountId)),
+    }),
+
+    schemaTool({
+      name: "list_webhook_endpoints",
+      description: "List the account's webhook endpoints, oldest first.",
+      schema: {
+        type: "object",
+        properties: { accountId: accountIdSchema },
+        required: accountIdRequired ? ["accountId"] : [],
+      },
+      execute: async (args: { accountId?: string }) =>
+        client.webhooks.listEndpoints(accountIdOrDefault(args.accountId)),
+    }),
+
+    schemaTool({
+      name: "get_webhook_endpoint",
+      description: "Get one webhook endpoint.",
+      schema: entityIdSchema("endpointId"),
+      execute: async (args: { accountId?: string; endpointId: string }) =>
+        client.webhooks.getEndpoint(accountIdOrDefault(args.accountId), args.endpointId),
+    }),
+
+    schemaTool({
+      name: "create_webhook_endpoint",
+      description:
+        "Register a webhook endpoint. Accounts allow 1 endpoint, or 3 on paid plans; each url must be unique.",
+      schema: {
+        type: "object",
+        properties: { accountId: accountIdSchema, ...WEBHOOK_ENDPOINT_SCHEMA },
+        required: accountIdRequired ? ["accountId", "url", "email", "events"] : ["url", "email", "events"],
+      },
+      execute: async (args: CreateWebhookEndpointInput & { accountId?: string }) =>
+        client.webhooks.createEndpoint(accountIdOrDefault(args.accountId), webhookEndpointFields(args)),
+    }),
+
+    schemaTool({
+      name: "update_webhook_endpoint",
+      description:
+        "Change a webhook endpoint; only the fields sent are updated. Turning signing off discards its secret.",
+      schema: {
+        type: "object",
+        properties: { accountId: accountIdSchema, endpointId: { type: "string" }, ...WEBHOOK_ENDPOINT_SCHEMA },
+        required: accountIdRequired ? ["accountId", "endpointId"] : ["endpointId"],
+      },
+      execute: async (args: UpdateWebhookEndpointInput & { accountId?: string; endpointId: string }) =>
+        client.webhooks.updateEndpoint(
+          accountIdOrDefault(args.accountId),
+          args.endpointId,
+          webhookEndpointFields(args),
+        ),
+    }),
+
+    schemaTool({
+      name: "delete_webhook_endpoint",
+      description: "Delete a webhook endpoint and stop its deliveries.",
+      schema: entityIdSchema("endpointId"),
+      execute: async (args: { accountId?: string; endpointId: string }) => {
+        await client.webhooks.deleteEndpoint(accountIdOrDefault(args.accountId), args.endpointId);
+        return { ok: true };
+      },
     }),
 
     schemaTool({
@@ -711,6 +773,7 @@ export function createChatTools(
         type: "object",
         properties: {
           accountId: accountIdSchema,
+          endpoint_id: { type: "string" },
           event: { type: "string" },
           delivered: { type: "boolean" },
           from: { type: "integer" },
@@ -721,6 +784,7 @@ export function createChatTools(
       },
       execute: async (args: ListWebhookDispatchesQuery & { accountId?: string }) =>
         client.webhooks.listDispatches(accountIdOrDefault(args.accountId), {
+          endpoint_id: args.endpoint_id,
           event: args.event,
           delivered: args.delivered,
           from: args.from,
@@ -830,6 +894,24 @@ const PAGINATION_SCHEMA = {
   page: { type: "integer", minimum: 1 },
   perPage: { type: "integer", minimum: 1, maximum: 100 },
 } as const;
+
+const WEBHOOK_ENDPOINT_SCHEMA = {
+  url: { type: "string", format: "uri" },
+  email: { type: "string", format: "email" },
+  events: { type: "array", items: { type: "string" } },
+  name: { type: "string" },
+  is_active: { type: "boolean" },
+  signing_enabled: { type: "boolean" },
+} as const;
+
+/** Forward only the endpoint fields the schema advertises; omitted keys stay omitted. */
+function webhookEndpointFields<T extends UpdateWebhookEndpointInput>(args: T): T {
+  const picked: UpdateWebhookEndpointInput = {};
+  for (const key of Object.keys(WEBHOOK_ENDPOINT_SCHEMA) as (keyof UpdateWebhookEndpointInput)[]) {
+    if (args[key] !== undefined) Object.assign(picked, { [key]: args[key] });
+  }
+  return picked as T;
+}
 
 const SIGNER_METHOD_PROPERTIES = {
   verification_method: { type: "string", enum: ["Email", "Whatsapp", "DigitalCertificate"] },

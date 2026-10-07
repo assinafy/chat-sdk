@@ -22,7 +22,7 @@ assumes the one before it.
 
 The SDK is one package with two halves that can be used independently.
 
-**The API client** covers the Assinafy v1 REST API: **93 operations across 71
+**The API client** covers the Assinafy v1 REST API: **106 operations across 81
 paths**, grouped into twelve resources — accounts, authentication, OAuth, users,
 signers, documents, tags, templates, assignments, fields, the signer-facing
 signature flow, and webhooks. Every operation is typed, and the transport
@@ -33,7 +33,7 @@ retries, and error mapping.
 `Chat` orchestrator that routes inbound messages to handlers, a `Thread` view
 handed to every handler, an adapter contract for connecting messaging
 platforms, a pluggable state contract for subscriptions and per-thread storage,
-a declarative card system with text, Markdown, and HTML renderers, and 36
+a declarative card system with text, Markdown, and HTML renderers, and 41
 provider-neutral tool descriptors for LLM tool calling.
 
 Two reference documents accompany this one and go deeper than it does:
@@ -41,7 +41,7 @@ Two reference documents accompany this one and go deeper than it does:
 - **[API reference](./docs/API_REFERENCE.md)** — every public method with its
   authentication mode, complete request and response payloads, the chat, card,
   adapter, and state surfaces, and the full AI tool catalog.
-- **[API operation index](./docs/API_COVERAGE.md)** — all 93 published
+- **[API operation index](./docs/API_COVERAGE.md)** — all 106 published
   operations mapped to their SDK method, plus the places where the SDK's HTTP
   surface goes beyond the published document.
 
@@ -125,6 +125,27 @@ is what the examples and the test suite use:
 | `ASSINAFY_ACCESS_TOKEN` | none | Bearer token, used instead of an API key |
 | `ASSINAFY_BASE_URL` | `https://api.assinafy.com.br/v1` | Set to `https://sandbox.assinafy.com.br/v1` for sandbox |
 | `ASSINAFY_ACCOUNT_ID` | none | Default account id, readable back as `client.accountId` |
+
+With two-factor authentication on, `auth.login()` resolves to
+`{ mfa_token }` instead of a session. Finish within five minutes with an
+authenticator code or a recovery code:
+
+```ts
+const result = await client.auth.login({ email, password });
+const session = "mfa_token" in result
+  ? await client.auth.verifyMfa({ mfa_token: result.mfa_token, code })
+  : result;
+```
+
+Authenticator enrollment is `auth.startTotp()` (returns the secret and the
+`otpauth://` URI once) followed by `auth.confirmTotp()` (returns the recovery
+codes, also once). `listMfaMethods`, `regenerateRecoveryCodes` and
+`deleteMfaMethod` complete the lifecycle; the last two require the password, an
+authenticator code, or a recovery code.
+
+> **Migrating to 2.4.0.** `auth.login()` is now typed
+> `LoginResponse | MfaChallenge`. Code that reads `access_token` directly must
+> first narrow with `"mfa_token" in result`, as above.
 
 Constructing with neither credential is deliberate and supported: an
 unauthenticated client is what you use for `auth.login()`, public document
@@ -267,7 +288,7 @@ Five rules decide whether an OAuth integration is reliable:
 | `documents:write` | Create documents and send them for signature — spends notification credits |
 | `templates:read` / `templates:write` | Read / manage templates |
 | `account:read` | Read the workspace's name and settings |
-| `webhooks:write` | Configure and deactivate the workspace webhook subscription |
+| `webhooks:write` | Create, change and delete the workspace webhook endpoints |
 | `openid`, `profile`, `email` | Identify the user; `oauth.getUserInfo()` returns the claims |
 | `offline_access` | Receive a refresh token |
 
@@ -607,43 +628,58 @@ await client.tags.removeFromDocument(accountId, document.id, tag.id); // detache
 
 ### Webhooks replace polling
 
-An account has one webhook subscription. Point it at your endpoint, list the
-events you care about, and Assinafy delivers each one:
+An account has 1 webhook endpoint, or up to 3 on paid plans. Each endpoint has
+its own URL, events and signing setting, and every active endpoint subscribed
+to an event receives it independently. Create one with signing enabled:
 
 ```ts
-await client.webhooks.updateSubscription(accountId, {
-  events: ["document_ready", "signer_signed_document", "document_processing_failed"],
-  is_active: true,
+const endpoint = await client.webhooks.createEndpoint(accountId, {
+  name: "ERP",
   url: "https://example.com/hooks/assinafy",
   email: "ops@example.test",
+  events: ["document_ready", "signer_signed_document", "document_processing_failed"],
+  signing_enabled: true,
 });
+const { secret } = await client.webhooks.getEndpointSecret(accountId, endpoint.id); // "whsec_…"
 ```
+
+Going past the plan's limit answers `403`; reusing another endpoint's `url`
+answers `400`. `listEndpoints`, `getEndpoint`, `updateEndpoint` (sends only the
+fields given) and `deleteEndpoint` complete the lifecycle.
+`rotateEndpointSecret` replaces the secret and the old one stops working
+immediately. Both secret methods need an API key or a user token — OAuth
+applications cannot reach them. `updateSubscription`, `getSubscription` and
+`inactivate` keep working and act on the account's **oldest** endpoint.
 
 `client.webhooks.listEventTypes()` enumerates every supported event with its
-description. When a delivery fails, `listDispatches()` shows the attempt history
-with the HTTP status and response body, and `retryDispatch()` replays one.
-`inactivate()` stops delivery while preserving the URL and event selection —
-the API exposes no true delete for a subscription.
+description. When a delivery fails, `listDispatches(accountId, { endpoint_id })`
+shows the attempt history with the HTTP status and response body, and
+`retryDispatch()` replays one.
 
-Verify each inbound delivery before trusting it. The SDK ships the HMAC
-primitives so an adapter only writes its platform's header parsing:
+Verify each inbound delivery before trusting it. Deliveries follow
+[Standard Webhooks](https://www.standardwebhooks.com): `webhook-id`,
+`webhook-timestamp` and `webhook-signature` headers, HMAC-SHA256 over
+`{id}.{timestamp}.{body}`.
 
 ```ts
-import { verifyWebhookSignature } from "@assinafy/chat-sdk/adapters";
+import { verifyStandardWebhook } from "@assinafy/chat-sdk/adapters";
 
-verifyWebhookSignature({
-  secret: process.env.WEBHOOK_SECRET!,
-  body: rawRequestBody,       // the raw bytes, before JSON parsing
-  signature: request.headers["x-signature"] as string,
-  timestamp: request.headers["x-timestamp"] as string, // enables replay protection
+verifyStandardWebhook({
+  secret,                                  // "whsec_…"
+  id: request.headers["webhook-id"] as string,
+  timestamp: request.headers["webhook-timestamp"] as string,
+  signature: request.headers["webhook-signature"] as string,
+  body: rawRequestBody,                    // the raw bytes, before JSON parsing
 });
 ```
 
-It throws `WebhookSignatureError` on a mismatch, a malformed signature, a
-missing secret, or a timestamp outside the tolerance window — five minutes by
-default. `isValidWebhookSignature()` is the same check returning a boolean. The
-signature must be computed over the raw body: parsing and re-serializing the
-JSON first will change the bytes and fail verification.
+It throws `WebhookSignatureError` on a mismatch, a missing secret, or a
+timestamp outside the tolerance window — five minutes by default; answer `401`.
+Deduplicate on `webhook-id`: it repeats on every attempt of the same event to
+the same endpoint. The signature covers the raw body: parsing and re-serializing
+the JSON changes the bytes and fails verification. For other platforms'
+webhooks (Slack, Stripe and similar), `verifyWebhookSignature()` and
+`isValidWebhookSignature()` cover hex or base64 HMAC with a timestamp prefix.
 
 ### The signer-facing flow
 
@@ -812,7 +848,7 @@ name cannot become script execution.
 
 ## 10. Driving the API from an LLM
 
-`createChatTools(client)` returns 36 provider-neutral tool descriptors — the
+`createChatTools(client)` returns 41 provider-neutral tool descriptors — the
 read and write operations a conversational assistant realistically needs.
 Each descriptor carries a `name`, a `description`, a JSON Schema exposed as
 both `input_schema` (Anthropic's field name) and `parameters` (OpenAI's), and

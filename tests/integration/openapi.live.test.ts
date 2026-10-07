@@ -46,7 +46,7 @@ describe("Assinafy production OpenAPI contract", () => {
     const documented = [...coverage.matchAll(/^\| (GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS) \| `([^`]+)` \|/gm)]
       .map((match) => `${match[1]} ${match[2]}`);
 
-    expect(published).toHaveLength(93);
+    expect(published).toHaveLength(106);
     expect(new Set(documented).size).toBe(documented.length);
     expect(documented.sort()).toEqual(published.sort());
 
@@ -116,5 +116,23 @@ describe("Assinafy production OAuth contract", () => {
     expect(failure).not.toBeInstanceOf(OAuthError);
     expect((failure as ApiError).status).toBe(401);
     expect((failure as ApiError).wwwAuthenticate).toContain("resource_metadata=");
+  });
+});
+
+/**
+ * Webhook endpoints and two-factor routes are served by production; the sandbox
+ * answers its framework `404` page for them. An unauthenticated read must be
+ * challenged with `401`, which proves the route exists without credentials.
+ */
+describe("Assinafy production webhook-endpoint and two-factor routes", () => {
+  const client = new AssinafyClient();
+
+  it.each([
+    ["webhooks.listEndpoints", () => client.webhooks.listEndpoints("contractprobe")],
+    ["auth.listMfaMethods", () => client.auth.listMfaMethods()],
+  ])("challenges an unauthenticated %s with 401", async (_name, call) => {
+    const failure = await call().then(() => undefined, (error: unknown) => error);
+    expect(failure).toBeInstanceOf(ApiError);
+    expect((failure as ApiError).status).toBe(401);
   });
 });
