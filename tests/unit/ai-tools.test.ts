@@ -315,7 +315,7 @@ describe("createChatTools", () => {
       list_webhook_event_types: {},
       list_webhook_dispatches: {},
       retry_webhook_dispatch: { dispatchId: "wh1" },
-      send_public_token: { documentId: "d1", email: "signer@example.com" },
+      send_public_token: { documentId: "d1", recipient: "signer@example.com" },
       verify_document: { signatureHash: "0".repeat(64) },
       list_accounts: {},
     };

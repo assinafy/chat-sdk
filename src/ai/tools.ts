@@ -608,14 +608,11 @@ export function createChatTools(
           accountId: accountIdSchema,
           fieldId: { type: "string" },
           value: {},
-          accessCode: { type: "string", description: "Signer access code for public signer flows." },
         },
         required: accountIdRequired ? ["accountId", "fieldId", "value"] : ["fieldId", "value"],
       },
-      execute: async (args: { accountId?: string; fieldId: string; value: unknown; accessCode?: string }) =>
-        client.fields.validate(accountIdOrDefault(args.accountId), args.fieldId, args.value, {
-          accessCode: args.accessCode,
-        }),
+      execute: async (args: { accountId?: string; fieldId: string; value: unknown }) =>
+        client.fields.validate(accountIdOrDefault(args.accountId), args.fieldId, args.value),
     }),
 
     schemaTool({
@@ -633,14 +630,11 @@ export function createChatTools(
               required: ["field_id", "value"],
             },
           },
-          accessCode: { type: "string", description: "Signer access code for public signer flows." },
         },
         required: accountIdRequired ? ["accountId", "entries"] : ["entries"],
       },
-      execute: async (args: { accountId?: string; entries: ValidateFieldEntry[]; accessCode?: string }) =>
-        client.fields.validateMultiple(accountIdOrDefault(args.accountId), args.entries, {
-          accessCode: args.accessCode,
-        }),
+      execute: async (args: { accountId?: string; entries: ValidateFieldEntry[] }) =>
+        client.fields.validateMultiple(accountIdOrDefault(args.accountId), args.entries),
     }),
 
     schemaTool({
@@ -812,30 +806,17 @@ export function createChatTools(
     schemaTool({
       name: "send_public_token",
       description:
-        "Ask Assinafy to email a fresh public document access token.",
+        "Email a one-time access token for a pending document to one of its signers who has not signed yet.",
       schema: {
         type: "object",
         properties: {
           documentId: { type: "string" },
-          email: { type: "string", format: "email" },
-          recipient: { type: "string" },
-          channel: { type: "string", enum: ["email", "whatsapp"] },
+          recipient: { type: "string", format: "email", description: "The signer's email address." },
         },
-        required: ["documentId"],
-        anyOf: [{ required: ["email"] }, { required: ["recipient", "channel"] }],
+        required: ["documentId", "recipient"],
       },
-      execute: async (args: {
-        documentId: string;
-        email?: string;
-        recipient?: string;
-        channel?: "email" | "whatsapp";
-      }) =>
-        client.documents.sendPublicToken(
-          args.documentId,
-          args.email
-            ? { email: args.email }
-            : { recipient: args.recipient!, channel: args.channel! },
-        ),
+      execute: async (args: { documentId: string; recipient: string }) =>
+        client.documents.sendPublicToken(args.documentId, { channel: "email", recipient: args.recipient }),
     }),
 
     schemaTool({

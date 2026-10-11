@@ -169,8 +169,8 @@ it at the host root. The SDK derives that origin from the configured `baseUrl`.
 | PUT | `/v1/signers/accept-terms` | `client.signature.acceptTerms` | [Request](API_REFERENCE.md#signature-accept-terms) | [Unwrapped response](API_REFERENCE.md#signature-accept-terms) | Signer access code |
 | POST | `/v1/signature` | `client.signature.upload` | [Request](API_REFERENCE.md#signature-upload) | [Unwrapped response](API_REFERENCE.md#signature-upload) | Signer access code |
 | GET | `/v1/signature/{signatureType}` | `client.signature.download` | [Request](API_REFERENCE.md#signature-download) | [Raw response](API_REFERENCE.md#signature-download) | Signer access code |
-| GET | `/v1/signers/{signerId}/documents` | `client.signature.listDocuments` | [Request](API_REFERENCE.md#signature-list-documents) | [Unwrapped response](API_REFERENCE.md#signature-list-documents) | Signer access code |
-| GET | `/v1/signers/{signerId}/documents/search` | `client.signature.searchDocuments` | [Request](API_REFERENCE.md#signature-search-documents) | [Unwrapped response](API_REFERENCE.md#signature-search-documents) | Signer access code |
+| GET | `/v1/signers/{signerId}/documents` | `client.signature.listDocuments` (signer code), `client.signature.listDocumentsAsWorkspace` (workspace) | [Request](API_REFERENCE.md#signature-list-documents) | [Unwrapped response](API_REFERENCE.md#signature-list-documents) | Signer access code, or Bearer / API key |
+| GET | `/v1/signers/{signerId}/documents/search` | `client.signature.searchDocuments` (signer code), `client.signature.searchDocumentsAsWorkspace` (workspace) | [Request](API_REFERENCE.md#signature-search-documents) | [Unwrapped response](API_REFERENCE.md#signature-search-documents) | Signer access code, or Bearer / API key |
 | GET | `/v1/signers/{signerId}/documents/{documentId}/download/{artifactName}` | `client.signature.downloadDocument` | [Request](API_REFERENCE.md#signature-download-document) | [Raw response](API_REFERENCE.md#signature-download-document) | Public |
 
 ### Tags
@@ -229,19 +229,33 @@ document it carries no published compatibility guarantee. Applications that need
 a strictly documented surface can read the same fields from
 [`templates.list`](API_REFERENCE.md#templates-list).
 
-## Query parameters the SDK sends beyond the published document
+## Common list parameters
 
-Several list methods forward optional parameters the OpenAPI document does not
-declare for that path. Each is omitted from the request unless the caller
-supplies it, so the documented behavior is unchanged when they are left unset.
+The document's introduction states that list endpoints accept `search`, `page`,
+`per-page` (max 100) and `sort`, and report `X-Pagination-*` headers. Where a
+list operation does not repeat those parameters itself, the SDK still forwards
+them from that common contract, and only when the caller supplies them:
 
-| SDK method | Undeclared parameters | Verified against the sandbox |
-| --- | --- | --- |
-| `client.tags.list` | `sort`, `page`, `per-page` | `page`/`per-page` paginate; `sort` is accepted |
-| `client.signers.list` | `sort` | Accepted; ordering effect not observable |
-| `client.templates.list` | `status`, `tags`, `sort` | Accepted |
-| `client.signature.listDocuments` | `status`, `method`, `search`, `sort`, `tags` | Accepted |
-| `client.fields.validate`, `client.fields.validateMultiple` | `signer-access-code` | Accepted; sent only for signer-facing calls |
+| SDK method | Common parameters forwarded |
+| --- | --- |
+| `client.tags.list` | `sort`, `page`, `per-page` |
+| `client.signers.list` | `sort` |
+| `client.templates.list` | `sort` |
+| `client.signature.listDocuments`, `client.signature.listDocumentsAsWorkspace` | `search`, `sort` |
+
+No other undeclared parameter or body field is sent. Deprecated SDK inputs that
+have no counterpart in an operation (for example `status`/`tags` on the
+template and signer-document lists, `tags` on upload, or `is_active` on field
+creation) are ignored rather than forwarded.
+
+## Signer access codes
+
+Operations authenticated by `signer-access-code` are sent with that code as the
+only credential — never with the client's API key or bearer token — and the SDK
+rejects a missing or blank code before sending. The two signer-document reads
+that also accept workspace credentials have separate `…AsWorkspace` methods.
+`client.fields.validate` and `validateMultiple` are workspace operations and
+reject a signer access code.
 
 ## Related SDK helpers
 

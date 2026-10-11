@@ -452,7 +452,9 @@ silent retry could create a duplicate signature request. Aborting through
 
 Pass `onRateLimit` to observe parsed `X-Rate-Limit-*` metadata as it arrives;
 an exception thrown by that observer is swallowed so it can never turn a
-successful request into a failed one.
+successful request into a failed one. A failed request carries the same data on
+`ApiError.rateLimit`, and a `429` also carries `ApiError.retryAfterSeconds`
+from the `Retry-After` header — wait that long before retrying a mutating call.
 
 ---
 
@@ -589,7 +591,8 @@ await client.assignments.create(document.id, {
 Field definitions themselves are account-scoped and reusable — create them with
 `client.fields.create()`, list the available types with
 `client.fields.listTypes()`, and validate values before submission with
-`client.fields.validate()` or `validateMultiple()`.
+`client.fields.validate()` or `validateMultiple()` (workspace credentials only;
+they reject a signer access code).
 
 ### Templates skip the upload
 
@@ -704,18 +707,27 @@ time or several at once. Digital-certificate signers must confirm their data and
 accept the terms before requesting signing context, which
 `client.signers.confirmDataForDocument()` does in a single call.
 
+Every method that takes an access code rejects a missing or blank one before
+sending anything and never attaches the client's API key or bearer token. To
+read a signer's documents with your workspace credentials instead, use
+`client.signature.listDocumentsAsWorkspace()` and
+`searchDocumentsAsWorkspace()`.
+
 Documents can also be released without a code at all:
 `client.documents.publicGet()` fetches a public summary,
 `client.documents.verify()` validates a signature hash with no credential, and
-`client.documents.sendPublicToken()` asks Assinafy to deliver a fresh access
-token:
+`client.documents.sendPublicToken()` asks Assinafy to email a fresh access
+token to a signer of a pending document who has not signed yet:
 
 ```ts
-await publicClient.documents.sendPublicToken(documentId, { email: "signer@example.test" });
+await publicClient.documents.sendPublicToken(documentId, {
+  channel: "email",
+  recipient: "signer@example.test",
+});
 ```
 
-That request is sent exactly once and never retried, because it can dispatch an
-email or WhatsApp message.
+Email is the only channel for this token. The request is sent exactly once and
+never retried, because it dispatches an email.
 
 ### Treat access codes as credentials
 

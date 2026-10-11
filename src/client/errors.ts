@@ -5,6 +5,8 @@
  * the messages are for humans and may change.
  */
 
+import type { RateLimit } from "./types.js";
+
 /** Base class for every error thrown by this SDK. */
 export class AssinafyError extends Error {
   override readonly name: string = "AssinafyError";
@@ -24,6 +26,10 @@ export interface ApiErrorArgs {
   message?: string;
   /** Raw `WWW-Authenticate` challenge, when the response carried one. */
   wwwAuthenticate?: string;
+  /** Parsed `X-Rate-Limit-*` headers, when the response carried them. */
+  rateLimit?: RateLimit;
+  /** Parsed `Retry-After` header in whole seconds, when the response carried one. */
+  retryAfterSeconds?: number;
 }
 
 /** Thrown when an HTTP request returns a non-2xx status. */
@@ -47,6 +53,17 @@ export class ApiError extends AssinafyError {
    * OAuth-authenticated call carries the permission the token is missing here.
    */
   readonly wwwAuthenticate?: string;
+  /**
+   * `X-Rate-Limit-Limit` / `-Remaining` / `-Reset` of the failed response, when
+   * present. Every rate-limited response carries them, `429` included.
+   */
+  readonly rateLimit?: RateLimit;
+  /**
+   * Seconds to wait before retrying, from the `Retry-After` header. The API
+   * sends it with `429 Too Many Requests`; safe reads are retried
+   * automatically, mutating requests surface it here for the caller to honour.
+   */
+  readonly retryAfterSeconds?: number;
 
   constructor(args: ApiErrorArgs) {
     super(args.message ?? `Assinafy API ${args.method} ${args.path} failed with status ${args.status}`);
@@ -55,6 +72,8 @@ export class ApiError extends AssinafyError {
     this.path = args.path;
     this.method = args.method;
     this.wwwAuthenticate = args.wwwAuthenticate;
+    this.rateLimit = args.rateLimit;
+    this.retryAfterSeconds = args.retryAfterSeconds;
   }
 }
 

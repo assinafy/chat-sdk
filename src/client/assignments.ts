@@ -8,14 +8,17 @@
 import { withQuery, type HttpClient } from "./http.js";
 import { ConfigurationError } from "./errors.js";
 import { pageQuery } from "./internal.js";
+import { SignatureResource } from "./signature.js";
 import type {
   Assignment,
   CostEstimate,
   CreateAssignmentInput,
   EstimateAssignmentCostInput,
+  EstimateAssignmentSignerInput,
   ListAssignmentsQuery,
   Page,
   ResendNotificationResult,
+  SignFieldEntry,
   WhatsAppNotification,
 } from "./types.js";
 
@@ -30,20 +33,23 @@ const paths = {
     `/documents/${encodeURIComponent(documentId)}/assignments/${encodeURIComponent(assignmentId)}/signers/${encodeURIComponent(signerId)}/estimate-resend-cost`,
   resetExpiration: (documentId: string, assignmentId: string) =>
     `/documents/${encodeURIComponent(documentId)}/assignments/${encodeURIComponent(assignmentId)}/reset-expiration`,
-  signerSubmit: (documentId: string, assignmentId: string) =>
-    `/documents/${encodeURIComponent(documentId)}/assignments/${encodeURIComponent(assignmentId)}`,
-  signerReject: (documentId: string, assignmentId: string) =>
-    `/documents/${encodeURIComponent(documentId)}/assignments/${encodeURIComponent(assignmentId)}/reject`,
   whatsappNotifications: (documentId: string, assignmentId: string) =>
     `/documents/${encodeURIComponent(documentId)}/assignments/${encodeURIComponent(assignmentId)}/whatsapp-notifications`,
 };
 
+/** Signature requests: create, price, resend, re-expire and inspect assignments (workspace credentials). */
 export class AssignmentsResource {
-  constructor(private readonly http: HttpClient) {}
+  /** Signer-facing operations reached through {@link sign} and {@link decline}. */
+  private readonly signature: SignatureResource;
+
+  constructor(private readonly http: HttpClient) {
+    this.signature = new SignatureResource(http);
+  }
 
   /**
-   * List the assignments belonging to the authenticated user's current
-   * account.
+   * `GET /assignments` — the assignments of the authenticated user's current
+   * account. Query: `page`, `per-page` (1–100). Returns {@link Assignment}
+   * objects with `X-Pagination-*` metadata.
    */
   async list(query: ListAssignmentsQuery = {}): Promise<Page<Assignment>> {
     return this.http.getPage<Assignment>(
@@ -52,11 +58,15 @@ export class AssignmentsResource {
   }
 
   /**
-   * Create an assignment, attaching one or more signers to a document.
+   * `POST /documents/{documentId}/assignments` — request signatures.
    *
-   * `signers: [{ id }]` is the canonical request field and supports per-signer
-   * verification, notification, and signing-order settings. The `signerIds`
-   * and `signer_ids` convenience aliases are normalized to that field.
+   * Request: `{ method: "virtual" | "collect", signers: [{ id,
+   * verification_method?: "Email" | "Whatsapp" | "DigitalCertificate",
+   * notification_methods?: ("Email" | "Whatsapp")[], step? }], entries?,
+   * message?, expires_at?, copy_receivers? }`. `entries` (page placements) is
+   * required for `collect`. The `signerIds`/`signer_ids` aliases are
+   * normalized into `signers`. Response: the created {@link Assignment},
+   * including `signing_urls`.
    */
   async create(documentId: string, input: CreateAssignmentInput): Promise<Assignment> {
     const body = normalizeAssignmentInput(input);
@@ -70,21 +80,42 @@ export class AssignmentsResource {
   }
 
   /**
-   * Estimate the cost of an assignment without creating it.
+   * `POST /documents/{documentId}/assignments/estimate-cost` — price an
+   * assignment without creating it.
    *
-   * The published contract marks `signers` as required only for `virtual`, but the API prices per
-   * signer in both methods and answers a signer-less estimate with
-   * `400 "Pelo menos um signatários precisa ser informado."`
+   * Request sent: `{ method?, signers?: [{ verification_method?,
+   * notification_methods? }], entries? }`. Signer ids do not affect cost and
+   * are not sent; each `signer_ids`/`signerIds` alias entry counts as one
+   * Email signer (`{}`). `signers` is required for `virtual` (and when
+   * `method` is omitted) and `entries` for `collect`; both are checked before
+   * the request. Response: {@link CostEstimate} — `documents`, `credits`,
+   * `needs_extra_document`, `extra_document_cost`, `total_credits`,
+   * `breakdown[]`, `document_balance`, `credit_balance`,
+   * `has_sufficient_resources`, `blocking_reason`, `message`.
    */
   async estimateCost(documentId: string, input: EstimateAssignmentCostInput): Promise<CostEstimate> {
-    const body = normalizeAssignmentInput(input);
-    if (!Array.isArray(body.signers) || body.signers.length === 0) {
+    const signers = (normalizeAssignmentInput(input).signers ?? []).map(
+      ({ verification_method, notification_methods }) => ({ verification_method, notification_methods }),
+    );
+    if (input.method === "collect") {
+      if (!input.entries?.length) {
+        throw new ConfigurationError("AssignmentsResource.estimateCost requires entries for collect");
+      }
+    } else if (signers.length === 0) {
       throw new ConfigurationError("AssignmentsResource.estimateCost requires at least one signer");
     }
-    return this.http.post<CostEstimate>(paths.estimate(documentId), body);
+    return this.http.post<CostEstimate>(paths.estimate(documentId), {
+      method: input.method,
+      ...(signers.length > 0 ? { signers } : {}),
+      entries: input.entries,
+    });
   }
 
-  /** Resend the assignment notification to one signer. */
+  /**
+   * `PUT /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/resend`
+   * — resend the signature request on the signer's channels (Email and/or
+   * WhatsApp). Response: `{ is_sent, document_id, signer_id }`.
+   */
   resendToSigner(
     documentId: string,
     assignmentId: string,
@@ -93,7 +124,10 @@ export class AssignmentsResource {
     return this.http.put<ResendNotificationResult>(paths.signerResend(documentId, assignmentId, signerId));
   }
 
-  /** Estimate the cost of resending one signer's notification. */
+  /**
+   * `POST /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/estimate-resend-cost`
+   * — price a resend before sending it. Response: {@link CostEstimate}.
+   */
   estimateResendCost(
     documentId: string,
     assignmentId: string,
@@ -103,47 +137,46 @@ export class AssignmentsResource {
   }
 
   /**
-   * Reset (extend) an assignment's expiration date. `expiresAt` must be an
-   * ISO 8601 date-time — the API rejects the request with `400` if it is
-   * omitted.
+   * `PUT /documents/{documentId}/assignments/{assignmentId}/reset-expiration`
+   * — set a new expiration or remove it. Request: `{ expires_at: string |
+   * null }`; the key is always sent. Pass an ISO 8601 date-time at least one
+   * hour ahead, or `null` to clear the expiration. Not allowed once the
+   * document is closed. Response: the updated {@link Assignment}.
    */
-  resetExpiration(documentId: string, assignmentId: string, expiresAt: string): Promise<Assignment> {
+  async resetExpiration(
+    documentId: string,
+    assignmentId: string,
+    expiresAt: string | null,
+  ): Promise<Assignment> {
+    if (expiresAt !== null && typeof expiresAt !== "string") {
+      throw new ConfigurationError("resetExpiration requires an ISO 8601 date-time or null");
+    }
     return this.http.put<Assignment>(paths.resetExpiration(documentId, assignmentId), {
       expires_at: expiresAt,
     });
   }
 
   /**
-   * Submit signer-filled values for a collect assignment. Virtual assignments
-   * require confirmed signer data first; digital-certificate assignments use
-   * the certificate signing flow instead of this endpoint.
+   * Alias of {@link SignatureResource.sign}: submit signer-filled values with
+   * the signer's access code (never the workspace credentials).
    */
-  async sign(
-    documentId: string,
-    assignmentId: string,
-    accessCode: string,
-    entries: Array<{ itemId: string; fieldId: string; pageId: string; value: string }>,
-  ): Promise<void> {
-    await this.http.post<unknown>(
-      withQuery(paths.signerSubmit(documentId, assignmentId), { "signer-access-code": accessCode }),
-      entries,
-    );
+  sign(documentId: string, assignmentId: string, accessCode: string, entries: SignFieldEntry[]): Promise<void> {
+    return this.signature.sign(documentId, assignmentId, accessCode, entries);
   }
 
-  /** Decline an assignment using a signer access code. */
-  async decline(
-    documentId: string,
-    assignmentId: string,
-    accessCode: string,
-    declineReason: string,
-  ): Promise<void> {
-    await this.http.put<unknown>(
-      withQuery(paths.signerReject(documentId, assignmentId), { "signer-access-code": accessCode }),
-      { decline_reason: declineReason },
-    );
+  /**
+   * Alias of {@link SignatureResource.decline}: decline with the signer's
+   * access code (never the workspace credentials).
+   */
+  decline(documentId: string, assignmentId: string, accessCode: string, declineReason: string): Promise<void> {
+    return this.signature.decline(documentId, assignmentId, accessCode, declineReason);
   }
 
-  /** List rendered WhatsApp notifications sent for an assignment. */
+  /**
+   * `GET /documents/{documentId}/assignments/{assignmentId}/whatsapp-notifications`
+   * — the WhatsApp messages sent for an assignment, as rendered. Response:
+   * `[{ sent_at, header, body, buttons: [{ text }], phone_number, signer_id }]`.
+   */
   whatsappNotifications(documentId: string, assignmentId: string): Promise<WhatsAppNotification[]> {
     return this.http.get<WhatsAppNotification[]>(paths.whatsappNotifications(documentId, assignmentId));
   }
@@ -156,7 +189,7 @@ export class AssignmentsResource {
  */
 function normalizeAssignmentInput(
   input: CreateAssignmentInput | EstimateAssignmentCostInput,
-): Record<string, unknown> {
+): Record<string, unknown> & { signers?: EstimateAssignmentSignerInput[] } {
   const { signerIds, signer_ids, signers, ...rawRest } = input;
   const { expiration, ...rest } = rawRest as typeof rawRest & { expiration?: string };
   const ids = [...(signer_ids ?? []), ...(signerIds ?? [])];

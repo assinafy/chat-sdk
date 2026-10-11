@@ -105,7 +105,10 @@ Methods documented as `void` consume a successful response and resolve with
 ### Errors, retries, and metadata
 
 Every non-2xx response throws `ApiError`. Its public fields are `status`, `body`,
-`path`, and `method`; signer access codes in `path` are redacted. Network errors,
+`path`, `method`, `wwwAuthenticate`, `rateLimit` (parsed `X-Rate-Limit-Limit`,
+`-Remaining` and `-Reset`, when present) and `retryAfterSeconds` (the
+`Retry-After` header the API sends with `429 Too Many Requests`); signer access
+codes in `path` are redacted. Network errors,
 `408`, `425`, `429`, and selected `5xx` responses may be retried according to
 `maxRetries` and `retryBaseDelayMs`, but only for safe `GET`, `HEAD`, and
 `OPTIONS` requests. Mutating requests are never retried by the transport. Use
@@ -119,10 +122,13 @@ active retry wait.
 try {
   await client.documents.remove(documentId);
 } catch (error) {
-  if (error instanceof ApiError) {
-    console.error(error.status, error.method, error.path, error.body);
+  if (error instanceof ApiError && error.status === 429) {
+    // Mutating requests are not retried automatically: wait, then retry once.
+    await new Promise((resolve) => setTimeout(resolve, (error.retryAfterSeconds ?? 1) * 1000));
+    await client.documents.remove(documentId);
+  } else {
+    throw error;
   }
-  throw error;
 }
 ```
 
@@ -207,6 +213,13 @@ token or API key, never an OAuth application's token.
 **Migrating to 2.4.0.** `login` is typed `LoginResponse | MfaChallenge`; narrow
 before reading `access_token`.
 
+**Migrating to 2.4.1.** Signer-facing methods reject a missing or blank access
+code and no longer attach the client's API key or bearer token; read a signer's
+documents with workspace credentials through
+`signature.listDocumentsAsWorkspace`/`searchDocumentsAsWorkspace`.
+`documents.sendPublicToken` requires `{ channel: "email", recipient }`.
+`fields.validate`/`validateMultiple` reject `options.accessCode`.
+
 ### OAuth
 
 For applications that act inside **other people's** workspaces. Automating your
@@ -284,7 +297,7 @@ it back, not only its `state`. `refreshToken` raises `OAuthError`
 | <a id="documents-activities"></a>`documents.activities(documentId)` | `GET /documents/{documentId}/activities` | account | path/query only | [`DocumentActivity[]`](#document-activity-response) |
 | <a id="documents-verify"></a>`documents.verify(signatureHash)` | `GET /documents/{documentSignatureHash}/verify` | public | path/query only | [`DocumentVerificationResult`](#document-verification-response) |
 | <a id="documents-public-get"></a>`documents.publicGet(documentId)` | `GET /public/documents/{documentId}` | public | path/query only | [`Document \| PublicDocument`](#public-document-response) |
-| <a id="documents-send-public-token"></a>`documents.sendPublicToken(documentId, input?)` | `PUT /public/documents/{documentId}/send-token` | public | optional [`SendPublicTokenInput`](#send-public-token-request) | [`SendPublicTokenResult \| undefined`](#send-public-token-response) |
+| <a id="documents-send-public-token"></a>`documents.sendPublicToken(documentId, input)` | `PUT /public/documents/{documentId}/send-token` | public | [`SendPublicTokenInput`](#send-public-token-request) | [`SendPublicTokenResult`](#send-public-token-response) |
 
 ### Tags
 
@@ -333,13 +346,20 @@ Document-tag operations take tag **IDs**, not tag names.
 | <a id="fields-get"></a>`fields.get(accountId, fieldId)` | `GET /accounts/{accountId}/fields/{fieldId}` | account | path/query only | [`FieldDefinition`](#field-response) |
 | <a id="fields-update"></a>`fields.update(accountId, fieldId, input)` | `PUT /accounts/{accountId}/fields/{fieldId}` | account | [`UpdateFieldInput`](#update-field-request) | [`FieldDefinition`](#field-response) |
 | <a id="fields-remove"></a>`fields.remove(accountId, fieldId)` | `DELETE /accounts/{accountId}/fields/{fieldId}` | account | path/query only | [`void`](#unwrapped-json-pagination-raw-responses-and-void) |
-| <a id="fields-validate"></a>`fields.validate(accountId, fieldId, value, options?)` | `POST /accounts/{accountId}/fields/{fieldId}/validate` | account; sends signer code when provided | [`{ value }`](#validate-field-request) | [`FieldValidationResult`](#field-validation-response) |
-| <a id="fields-validate-multiple"></a>`fields.validateMultiple(accountId, entries, options?)` | `POST /accounts/{accountId}/fields/validate-multiple` | account; sends signer code when provided | [`ValidateFieldEntry[]`](#validate-multiple-fields-request) | [`FieldValidationResult[]`](#field-validation-response) |
+| <a id="fields-validate"></a>`fields.validate(accountId, fieldId, value, options?)` | `POST /accounts/{accountId}/fields/{fieldId}/validate` | account only; `options.accessCode` rejects | [`{ value }`](#validate-field-request) | [`FieldValidationResult`](#field-validation-response) |
+| <a id="fields-validate-multiple"></a>`fields.validateMultiple(accountId, entries, options?)` | `POST /accounts/{accountId}/fields/validate-multiple` | account only; `options.accessCode` rejects | [`ValidateFieldEntry[]`](#validate-multiple-fields-request) | [`FieldValidationResult[]`](#field-validation-response) |
 | <a id="fields-list-types"></a>`fields.listTypes()` | `GET /field-types` | account | path/query only | [`FieldType[]`](#field-type-response) |
 
 ### Signer-facing signature flow
 
 All signer-code examples use a placeholder. Treat the real value as a secret.
+
+Every method that takes `accessCode` rejects a missing or blank code with
+`ConfigurationError` before sending anything, and sends the code as the only
+credential: the client's API key or bearer token is never attached to these
+requests. To read a signer's documents with the workspace's own credentials,
+use the separate `listDocumentsAsWorkspace` and `searchDocumentsAsWorkspace`
+methods.
 
 | SDK method | HTTP operation | Auth | Request | Unwrapped SDK response |
 | --- | --- | --- | --- | --- |
@@ -351,7 +371,9 @@ All signer-code examples use a placeholder. Treat the real value as a secret.
 | <a id="signature-sign-context"></a>`signature.signContext(accessCode, options?)` | `GET /sign` | signer code | [`has_accepted_terms`](#sign-context-query) | [`Document`](#document-response) |
 | <a id="signature-current-document"></a>`signature.currentDocument(signerId, accessCode)` | `GET /signers/{signerId}/document` | signer code | path/query only | [`Document`](#document-response) |
 | <a id="signature-list-documents"></a>`signature.listDocuments(signerId, accessCode, query?)` | `GET /signers/{signerId}/documents` | signer code | [`ListSignerDocumentsQuery`](#document-list-query) | [`Page<Document>`](#document-response) |
+| <a id="signature-list-documents-as-workspace"></a>`signature.listDocumentsAsWorkspace(signerId, query?)` | `GET /signers/{signerId}/documents` | account (the signer must belong to the workspace) | [`ListSignerDocumentsQuery`](#document-list-query) | [`Page<Document>`](#document-response) |
 | <a id="signature-search-documents"></a>`signature.searchDocuments(signerId, accessCode, search?)` | `GET /signers/{signerId}/documents/search` | signer code | [`search`](#signer-document-search-query) | [`Page<Document>`](#document-response) |
+| <a id="signature-search-documents-as-workspace"></a>`signature.searchDocumentsAsWorkspace(signerId, search?)` | `GET /signers/{signerId}/documents/search` | account (the signer must belong to the workspace) | [`search`](#signer-document-search-query) | [`Page<Document>`](#document-response) |
 | <a id="signature-sign"></a>`signature.sign(documentId, assignmentId, accessCode, entries)` | `POST /documents/{documentId}/assignments/{assignmentId}` | signer code | [`SignFieldEntry[]`](#sign-assignment-request) | [`void`](#unwrapped-json-pagination-raw-responses-and-void) |
 | <a id="signature-decline"></a>`signature.decline(documentId, assignmentId, accessCode, declineReason)` | `PUT /documents/{documentId}/assignments/{assignmentId}/reject` | signer code | [`{ decline_reason }`](#decline-request) | [`void`](#unwrapped-json-pagination-raw-responses-and-void) |
 | <a id="signature-sign-multiple"></a>`signature.signMultiple(accessCode, documentIds)` | `PUT /signers/documents/sign-multiple` | signer code | [`{ document_ids }`](#multiple-document-action-requests) | [`void`](#unwrapped-json-pagination-raw-responses-and-void) |
@@ -1094,9 +1116,8 @@ SDK object and corresponding query string:
 ?search=aline&sort=full_name&page=1&per-page=20
 ```
 
-When supplied, `sort` is encoded as a query parameter. The published document
-does not declare `sort` for this path; see
-[query parameters beyond the published document](./API_COVERAGE.md#query-parameters-the-sdk-sends-beyond-the-published-document).
+When supplied, `sort` is encoded as a query parameter under the API's
+[common list parameters](./API_COVERAGE.md#common-list-parameters).
 
 #### Create signer request
 
@@ -1104,11 +1125,14 @@ does not declare `sort` for this path; see
 {
   "full_name": "Example Signer",
   "email": "signer@example.test",
-  "whatsapp_phone_number": "+5511999999999"
+  "whatsapp_phone_number": "+5511999999999",
+  "government_id": "12345678909"
 }
 ```
 
-Only `full_name` is required by the SDK type. Provide at least one reachable
+Only `full_name` is required. `whatsapp_phone_number` is needed for WhatsApp
+verification or notification and `government_id` (CPF/CNPJ) for
+`DigitalCertificate` signers. Provide at least one reachable
 notification destination before assigning the signer.
 
 #### Update signer request
@@ -1136,8 +1160,9 @@ Request body:
 }
 ```
 
-The SDK type also accepts `whatsapp_phone_number` and `has_accepted_terms`.
-`signature.acceptTerms()` is the dedicated terms-acceptance operation.
+Only these three fields are sent. `has_accepted_terms: true` in the SDK input
+makes the method call the dedicated `PUT /signers/accept-terms` operation right
+after the confirmation; the deprecated `whatsapp_phone_number` input is ignored.
 
 #### Signer response
 
@@ -1237,10 +1262,9 @@ API may add statuses.
 
 The SDK joins array-valued `status` and `tags` with commas and encodes
 `perPage` as `per-page`. The published sort fields are `name` and `updated_at`.
-`signature.listDocuments` accepts the same object, but the published document
-declares only `page` and `per-page` for the signer-facing path; the remaining
-filters are listed under
-[query parameters beyond the published document](./API_COVERAGE.md#query-parameters-the-sdk-sends-beyond-the-published-document).
+`signature.listDocuments` and `listDocumentsAsWorkspace` accept the same object
+but send only `search`, `sort`, `page` and `per-page`; `status`, `method` and
+`tags` are not part of the signer-document operation and are ignored.
 
 #### Document search query
 
@@ -1278,9 +1302,9 @@ await client.documents.upload(accountId, {
 });
 ```
 
-The SDK can additionally append each `tags` value as a `tags[]` multipart
-field. Files larger than 25 MB are rejected before transport; the API enforces
-the 2,000-page limit.
+Only the `file` part is sent; the deprecated `tags` input is ignored — attach
+tags after the upload with `tags.addToDocument`. Files larger than 25 MB are
+rejected before transport; the API enforces the 2,000-page limit.
 
 #### Rename document request
 
@@ -1509,28 +1533,27 @@ compact member of that return union:
 
 #### Send public token request
 
-The body may be omitted. When targeting a known email address, use:
+Both fields are required and `email` is the only channel:
 
 ```json
 {
-  "email": "signer@example.test"
+  "channel": "email",
+  "recipient": "signer@example.test"
 }
 ```
 
-The SDK type also accepts an explicit `{ "recipient": "…", "channel":
-"email" | "whatsapp" }` body. `sendPublicToken()` sends whichever body the
-caller supplies exactly once; it never retries a rejected notification request
-with a different payload.
+`recipient` must be the email of a signer of the document who has not signed
+yet, and the document must be pending signature. The SDK rejects a missing
+input, a blank `recipient` or any other channel with `ConfigurationError` before
+sending. The deprecated `{ email }` input is sent as `{ "channel": "email",
+"recipient": email }`. A rejected request is never retried.
 
 #### Send public token response
-
-The operation normally returns a success envelope without `data`, so the SDK
-resolves `undefined`. If a response includes data, the return type exposes it as
-an optional `SendPublicTokenResult`:
 
 ```json
 {
   "document": {
+    "resource": "document",
     "id": "doc_01J00000000000000000000000",
     "name": "contract.pdf",
     "page_count": 3,
@@ -1541,7 +1564,7 @@ an optional `SendPublicTokenResult`:
 }
 ```
 
-Do not require those optional response fields.
+The sandbox currently serializes `page_count` as a string (`"3"`).
 
 ### Tag payloads
 
@@ -1558,10 +1581,8 @@ Do not require those optional response fields.
 
 The string overload `tags.list(accountId, "legal")` is shorthand for
 `{ search: "legal" }`. When supplied, `sort`, `page`, and `perPage` are encoded
-as query parameters. The published document declares only `search` for this
-path; pagination is verified to work against the API, and the other parameters
-are listed under
-[query parameters beyond the published document](./API_COVERAGE.md#query-parameters-the-sdk-sends-beyond-the-published-document).
+as query parameters under the API's
+[common list parameters](./API_COVERAGE.md#common-list-parameters).
 
 #### Create tag request
 
@@ -1648,20 +1669,16 @@ Removing one tag from a document:
 
 ```json
 {
-  "status": "ready",
   "search": "NDA",
-  "tags": ["tag_01J00000000000000000000000"],
   "sort": "-created_at",
   "page": 1,
   "perPage": 20
 }
 ```
 
-The SDK encodes `perPage` as `per-page`, joins array-valued `tags` with commas,
-and sends each supplied filter as a query parameter. The published document
-declares only `search`, `page`, and `per-page` for this path; `status`, `tags`,
-and `sort` are listed under
-[query parameters beyond the published document](./API_COVERAGE.md#query-parameters-the-sdk-sends-beyond-the-published-document).
+The SDK sends `search`, `sort`, `page` and `per-page` (the API's common list
+parameters). The deprecated `status` and `tags` members are not part of the
+list-templates operation and are ignored.
 
 #### Template response
 
@@ -1761,8 +1778,10 @@ properties.
 `signers` is required. Each signer needs the template `role_id` and an existing
 signer `id`. `tags` contains names; missing names are created and the resulting
 tags are merged with the template defaults. The published `editor_fields` form
-is the array shown above. The SDK retains the inline signer and keyed
-`editor_fields` forms as deprecated inputs for existing callers.
+is the array shown above. The SDK sends only the fields shown: a deprecated
+keyed `editor_fields` object is converted to that array, and the deprecated
+inline-signer properties (`full_name`, `email`, `whatsapp_phone_number`) are not
+sent.
 
 #### Estimate template cost request
 
@@ -1914,8 +1933,11 @@ transport. Each `copy_receivers` value is the ID of an existing signer record.
 }
 ```
 
-An existing signer `id` is optional in the SDK estimate input. The SDK normalizes
-`signerIds` and `signer_ids` aliases as it does for assignment creation.
+`signers` is required for `virtual` (and when `method` is omitted) and `entries`
+for `collect`; the SDK checks both before sending. Each signer may be `{}` to
+price the Email default. Signer ids do not affect cost and are not sent: a
+deprecated `id` in a signer entry is dropped, and each `signerIds`/`signer_ids`
+alias entry is sent as `{}`.
 
 #### Reset expiration request
 
@@ -1924,6 +1946,10 @@ An existing signer `id` is optional in the SDK estimate input. The SDK normalize
   "expires_at": "2026-09-20T23:59:59Z"
 }
 ```
+
+`expires_at` is required and nullable: send an ISO 8601 date-time at least one
+hour ahead, or `null` to remove the expiration (`resetExpiration(documentId,
+assignmentId, null)`). The key is always sent.
 
 #### Sign assignment request
 
@@ -2088,9 +2114,8 @@ These are the only query parameters published for the field-list operation.
 }
 ```
 
-`regex` and `is_required` are optional SDK input fields. The deprecated
-`is_active` input remains accepted for existing callers but is not published by
-the create operation; update activation after creation.
+`regex` and `is_required` are optional. Only the four fields shown are sent: the
+deprecated `is_active` input is ignored; update activation after creation.
 
 #### Update field request
 
@@ -2104,8 +2129,8 @@ Request body:
 }
 ```
 
-The SDK type also retains deprecated optional `type` and `is_required`
-properties for existing callers; the update operation does not publish them.
+Only these three fields are sent; the deprecated `type` and `is_required`
+inputs are ignored.
 
 #### Validate field request
 
@@ -2116,7 +2141,8 @@ properties for existing callers; the update operation does not publish them.
 ```
 
 `value` is deliberately typed `unknown`: its representation depends on the
-field type.
+field type. Validation uses the workspace's credentials only; passing
+`options.accessCode` rejects with `ConfigurationError`.
 
 #### Validate multiple fields request
 
@@ -2893,8 +2919,8 @@ methods.
 | `get_field` | `{ accountId?, fieldId }` | [`FieldDefinition`](#field-response) |
 | `update_field` | `{ accountId?, fieldId, name?, regex?, is_active? }` | [`FieldDefinition`](#field-response) |
 | `delete_field` | `{ accountId?, fieldId }` | `{ "ok": true }` |
-| `validate_field` | `{ accountId?, fieldId, value, accessCode? }` | [`FieldValidationResult`](#field-validation-response) |
-| `validate_fields` | `{ accountId?, entries, accessCode? }` | [`FieldValidationResult[]`](#field-validation-response) |
+| `validate_field` | `{ accountId?, fieldId, value }` | [`FieldValidationResult`](#field-validation-response) |
+| `validate_fields` | `{ accountId?, entries }` | [`FieldValidationResult[]`](#field-validation-response) |
 | `list_field_types` | `{}` | [`FieldType[]`](#field-type-response) |
 | `get_webhook_subscription` | `{ accountId? }` | [`WebhookSubscription \| null`](#webhook-subscription-response) |
 | `update_webhook_subscription` | `{ accountId?, events, is_active, url, email }` | [`WebhookSubscription`](#webhook-subscription-response) |
@@ -2907,11 +2933,10 @@ methods.
 | `list_webhook_event_types` | `{}` | [`WebhookEventTypeInfo[]`](#webhook-event-type-response) |
 | `list_webhook_dispatches` | `{ accountId?, endpoint_id?, event?, delivered?, from?, to?, page?, perPage? }` | [`Page<WebhookDispatch>`](#webhook-dispatch-response) |
 | `retry_webhook_dispatch` | `{ accountId?, dispatchId }` | [`WebhookDispatch`](#webhook-dispatch-response) |
-| `send_public_token` | `{ documentId, email }` | [`SendPublicTokenResult \| undefined`](#send-public-token-response) |
+| `send_public_token` | `{ documentId, recipient }` (sent as `channel: "email"`) | [`SendPublicTokenResult`](#send-public-token-response) |
 | `verify_document` | `{ signatureHash }` | [`DocumentVerificationResult`](#document-verification-response) |
 | `list_accounts` | `{}` | [`Account[]`](#account-response) |
 
-`send_public_token` also accepts `{ documentId, recipient, channel }`, and
 `tag_document` also accepts `tags`. The documented forms in the table are the
 shortest inputs for provider adapters.
 

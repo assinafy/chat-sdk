@@ -6,7 +6,7 @@
  */
 
 import { withQuery, type HttpClient } from "./http.js";
-import { csv, pageQuery } from "./internal.js";
+import { pageQuery } from "./internal.js";
 import type {
   CostEstimate,
   CreateDocumentFromTemplateInput,
@@ -26,25 +26,30 @@ const paths = {
     `/accounts/${encodeURIComponent(accountId)}/templates/${encodeURIComponent(templateId)}/documents/estimate-cost`,
 };
 
+/** Query accepted by {@link TemplatesResource.list}: `search`, `sort`, `page`, `per-page`. */
 export interface ListTemplatesQuery {
+  /** @deprecated Not part of the list-templates operation; ignored. */
   status?: string;
   search?: string;
+  /** @deprecated Not part of the list-templates operation; ignored. */
   tags?: string | string[];
   sort?: string;
   page?: number;
   perPage?: number;
 }
 
+/** Templates and template instantiation (`client.templates`). */
 export class TemplatesResource {
   constructor(private readonly http: HttpClient) {}
 
-  /** List all templates available under the account. */
+  /**
+   * `GET /accounts/{accountId}/templates` — the account's templates. Query
+   * sent: `search`, `sort`, `page`, `per-page`. Response: `Page<Template>`.
+   */
   async list(accountId: string, query: ListTemplatesQuery = {}): Promise<Page<Template>> {
     return this.http.getPage<Template>(
       withQuery(paths.collection(accountId), {
-        status: query.status,
         search: query.search,
-        tags: csv(query.tags),
         sort: query.sort,
         ...pageQuery(query.page, query.perPage),
       }),
@@ -52,25 +57,54 @@ export class TemplatesResource {
   }
 
   /**
-   * Fetch a single template by id. Unlike {@link list}, the detail response
+   * `GET /accounts/{accountId}/templates/{templateId}` (live, but not in the
+   * published OpenAPI document) — one {@link Template}. Unlike {@link list}, the detail response
    * includes `default_document_tags` and the full page/field/role layout.
    */
   get(accountId: string, templateId: string): Promise<Template> {
     return this.http.get<Template>(paths.item(accountId, templateId));
   }
 
-  /** Instantiate a template into a new document with concrete signers. */
+  /**
+   * `POST /accounts/{accountId}/templates/{templateId}/documents` — create a
+   * document from a template.
+   *
+   * Request sent: `{ signers: [{ role_id, id, verification_method?,
+   * notification_methods?, step? }], editor_fields?: [{ field_id, value }],
+   * name?, message?, expires_at?, tags? }`. Bind every non-Editor role. A
+   * keyed `editor_fields` object (deprecated) is sent as the array form.
+   * Response: the new {@link Document}.
+   */
   instantiate(
     accountId: string,
     templateId: string,
     input: CreateDocumentFromTemplateInput,
   ): Promise<Document> {
-    return this.http.post<Document>(paths.instantiate(accountId, templateId), input);
+    const { signers, editor_fields, name, message, expires_at, tags } = input;
+    return this.http.post<Document>(paths.instantiate(accountId, templateId), {
+      signers: signers.map(({ role_id, id, verification_method, notification_methods, step }) => ({
+        role_id,
+        id,
+        verification_method,
+        notification_methods,
+        step,
+      })),
+      editor_fields:
+        editor_fields === undefined || Array.isArray(editor_fields)
+          ? editor_fields
+          : Object.entries(editor_fields).map(([field_id, value]) => ({ field_id, value: String(value) })),
+      name,
+      message,
+      expires_at,
+      tags,
+    });
   }
 
   /**
-   * Estimate what instantiating a template will cost for a given set of
-   * signers, without actually creating the document.
+   * `POST /accounts/{accountId}/templates/{templateId}/documents/estimate-cost`
+   * — price a template instantiation without creating the document. Request:
+   * `{ signers: [{ role_id, verification_method?, notification_methods? }] }`
+   * (an array is wrapped). Response: {@link CostEstimate}.
    */
   estimateCost(
     accountId: string,

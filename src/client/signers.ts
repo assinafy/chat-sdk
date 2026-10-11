@@ -10,7 +10,8 @@
  */
 
 import { withQuery, type HttpClient } from "./http.js";
-import { pageQuery } from "./internal.js";
+import { SignatureResource } from "./signature.js";
+import { pageQuery, signerTransport, withAccessCode } from "./internal.js";
 import type {
   CreateSignerInput,
   ListSignersQuery,
@@ -34,9 +35,18 @@ const paths = {
 
 /** Authenticated CRUD for signers under a specific account. */
 export class SignersResource {
-  constructor(private readonly http: HttpClient) {}
+  /** Credential-free transport for the signer-facing confirm-data operation. */
+  private readonly signer: HttpClient;
 
-  /** List signers for the given account, optionally filtered by `search`. */
+  constructor(private readonly http: HttpClient) {
+    this.signer = signerTransport(http);
+  }
+
+  /**
+   * `GET /accounts/{accountId}/signers` — query `search`, `sort`, `page`,
+   * `per-page`. Response: `Page<Signer>` (`{ resource, id, full_name, email,
+   * whatsapp_phone_number, government_id, has_accepted_terms }`).
+   */
   async list(accountId: string, query: ListSignersQuery = {}): Promise<Page<Signer>> {
     return this.http.getPage<Signer>(
       withQuery(paths.collection(accountId), {
@@ -47,7 +57,7 @@ export class SignersResource {
     );
   }
 
-  /** Convenience: page through every signer. Lazy via async iterator. */
+  /** Page through every signer of {@link list} lazily (50 per request by default). */
   async *iterate(accountId: string, query: ListSignersQuery = {}): AsyncIterableIterator<Signer> {
     let page = query.page ?? 1;
     const perPage = query.perPage ?? 50;
@@ -59,43 +69,58 @@ export class SignersResource {
     }
   }
 
-  /** Create a new signer under the given account. */
+  /**
+   * `POST /accounts/{accountId}/signers` — request `{ full_name, email?,
+   * whatsapp_phone_number?, government_id? }`. Response: the new {@link Signer}.
+   */
   create(accountId: string, input: CreateSignerInput): Promise<Signer> {
     return this.http.post<Signer>(paths.collection(accountId), input);
   }
 
-  /** Fetch a single signer by id. */
+  /** `GET /accounts/{accountId}/signers/{signerId}` — one {@link Signer}. */
   get(accountId: string, signerId: string): Promise<Signer> {
     return this.http.get<Signer>(paths.item(accountId, signerId));
   }
 
-  /** Update a signer. All fields are optional. */
+  /**
+   * `PUT /accounts/{accountId}/signers/{signerId}` — request `{ full_name?,
+   * email?, whatsapp_phone_number?, government_id? }`. Response: the updated
+   * {@link Signer}.
+   */
   update(accountId: string, signerId: string, input: UpdateSignerInput): Promise<Signer> {
     return this.http.put<Signer>(paths.item(accountId, signerId), input);
   }
 
-  /** Delete a signer. Returns `void`. */
+  /** `DELETE /accounts/{accountId}/signers/{signerId}` — resolves on success. */
   async remove(accountId: string, signerId: string): Promise<void> {
     await this.http.delete<unknown>(paths.item(accountId, signerId));
   }
 
   /**
-   * Public flow: confirm/update signer data using a `signer-access-code`.
-   * Used by the embeddable signer UI before the signer signs.
+   * `PUT /documents/{documentId}/signers/confirm-data` — the signer confirms
+   * or updates their data before signing, authenticated by the access code
+   * alone (a missing or blank code rejects before any request).
    *
-   * Digital-certificate signers must confirm data and accept terms before
-   * fetching signing context. Passing `has_accepted_terms: true` here satisfies
-   * both requirements; terms may instead be accepted separately through
-   * `SignatureResource.acceptTerms`.
+   * Request sent: `{ full_name?, email?, government_id? }`. Response: the
+   * {@link Signer} (`{ resource, id, full_name, email, whatsapp_phone_number,
+   * government_id, has_accepted_terms }`).
+   *
+   * `has_accepted_terms: true` is not part of this operation: the SDK sends it
+   * as a separate `PUT /signers/accept-terms` after the confirmation, which is
+   * what digital-certificate signers need before `signature.signContext`.
+   * `whatsapp_phone_number` is not accepted here and is ignored.
    */
-  confirmDataForDocument(
+  async confirmDataForDocument(
     documentId: string,
     accessCode: string,
     input: SignerSelfConfirmDataInput,
   ): Promise<Signer> {
-    return this.http.put<Signer>(
-      withQuery(paths.selfConfirmData(documentId), { "signer-access-code": accessCode }),
-      input,
+    const { full_name, email, government_id, has_accepted_terms } = input;
+    const signer = await this.signer.put<Signer>(
+      withAccessCode(paths.selfConfirmData(documentId), accessCode),
+      { full_name, email, government_id },
     );
+    if (has_accepted_terms === true) await new SignatureResource(this.http).acceptTerms(accessCode);
+    return signer;
   }
 }

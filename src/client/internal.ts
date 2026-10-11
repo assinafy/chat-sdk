@@ -4,6 +4,7 @@
  */
 
 import { ConfigurationError } from "./errors.js";
+import { withQuery, type HttpClient } from "./http.js";
 
 /**
  * Join an array of string values with `,` for query-parameter use, or pass a
@@ -47,4 +48,30 @@ export function pageQuery(page?: number, perPage?: number): Record<string, numbe
     throw new ConfigurationError("perPage must be an integer between 1 and 100");
   }
   return { page, "per-page": perPage };
+}
+
+/**
+ * Append the `signer-access-code` credential (plus any other query values) to
+ * a signer-facing path. Rejects a missing or blank code: these operations
+ * authenticate with the code alone, so they are never sent without it — and
+ * never with workspace credentials in its place (see {@link signerTransport}).
+ */
+export function withAccessCode(
+  path: string,
+  accessCode: string,
+  query: Record<string, unknown> = {},
+): string {
+  if (typeof accessCode !== "string" || accessCode.trim() === "") {
+    throw new ConfigurationError("A non-empty signer access code is required");
+  }
+  return withQuery(path, { "signer-access-code": accessCode, ...query });
+}
+
+/**
+ * Credential-free copy of the transport for operations authenticated by a
+ * signer access code, so the workspace API key or bearer token is never sent
+ * alongside (or instead of) the code.
+ */
+export function signerTransport(http: HttpClient): HttpClient {
+  return http.fork({ auth: { kind: "none" } });
 }

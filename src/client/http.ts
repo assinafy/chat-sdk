@@ -75,7 +75,7 @@ export interface ResponseWithMeta<T> {
  * User-Agent never drifts from the published version.
  */
 declare const __SDK_VERSION__: string | undefined;
-const VERSION = typeof __SDK_VERSION__ !== "undefined" ? __SDK_VERSION__ : "2.4.0";
+const VERSION = typeof __SDK_VERSION__ !== "undefined" ? __SDK_VERSION__ : "2.4.1";
 const DEFAULT_USER_AGENT = `@assinafy/chat-sdk/${VERSION}`;
 const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 const RETRYABLE_METHOD = new Set(["GET", "HEAD", "OPTIONS"]);
@@ -301,7 +301,12 @@ export class HttpClient {
     };
   }
 
-  private async throwFromResponse(response: Response, path: string, method: string): Promise<never> {
+  private async throwFromResponse(
+    response: Response,
+    path: string,
+    method: string,
+    rateLimit: RateLimit | undefined,
+  ): Promise<never> {
     let body: unknown;
     try {
       const text = await response.text();
@@ -321,7 +326,17 @@ export class HttpClient {
       (isRecord(body) && typeof body.message === "string" && body.message) ||
       (oauth && `Assinafy OAuth ${method} ${path} failed: ${oauth.error}`) ||
       `Assinafy API ${method} ${path} failed with status ${response.status}`;
-    const args = { status: response.status, body, path, method, message, wwwAuthenticate };
+    const retryAfterMs = readRetryAfterMs(response.headers);
+    const args = {
+      status: response.status,
+      body,
+      path,
+      method,
+      message,
+      wwwAuthenticate,
+      rateLimit,
+      retryAfterSeconds: retryAfterMs === undefined ? undefined : Math.ceil(retryAfterMs / 1000),
+    };
     throw oauth ? new OAuthError({ ...args, ...oauth }) : new ApiError(args);
   }
 
@@ -330,21 +345,7 @@ export class HttpClient {
   }
 
   private backoff(attempt: number, headers?: Headers): number {
-    if (headers) {
-      const retryAfter = headers.get("retry-after");
-      if (retryAfter) {
-        // `Retry-After` may be either a number of seconds or an HTTP-date.
-        const seconds = Number(retryAfter);
-        if (Number.isFinite(seconds)) {
-          return Math.min(Math.max(seconds, 0) * 1000, MAX_TIMER_DELAY_MS);
-        }
-        const dateMs = Date.parse(retryAfter);
-        if (Number.isFinite(dateMs)) {
-          return Math.min(Math.max(dateMs - Date.now(), 0), MAX_TIMER_DELAY_MS);
-        }
-      }
-    }
-    return Math.min(this.retryBaseDelayMs * 2 ** attempt, 10_000);
+    return (headers && readRetryAfterMs(headers)) ?? Math.min(this.retryBaseDelayMs * 2 ** attempt, 10_000);
   }
 
   private sleep(ms: number, signal?: AbortSignal | null): Promise<void> {
@@ -415,7 +416,7 @@ export class HttpClient {
         continue;
       }
 
-      await this.throwFromResponse(response, safePath, method);
+      await this.throwFromResponse(response, safePath, method, rateLimit);
     }
   }
 }
@@ -496,6 +497,17 @@ function readRateLimit(headers: Headers): RateLimit | undefined {
     remaining: Number(headers.get("x-rate-limit-remaining") ?? 0),
     resetSeconds: Number(headers.get("x-rate-limit-reset") ?? 0),
   };
+}
+
+/** `Retry-After` as milliseconds; the header is either delay-seconds or an HTTP-date. */
+function readRetryAfterMs(headers: Headers): number | undefined {
+  const value = headers.get("retry-after");
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) return Math.min(Math.max(seconds, 0) * 1000, MAX_TIMER_DELAY_MS);
+  const dateMs = Date.parse(value);
+  if (Number.isFinite(dateMs)) return Math.min(Math.max(dateMs - Date.now(), 0), MAX_TIMER_DELAY_MS);
+  return undefined;
 }
 
 function isLikelyTransient(err: unknown): boolean {

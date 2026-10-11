@@ -2,13 +2,14 @@
  * Field-definition resource.
  *
  * Field definitions describe signer-entered values used by collect
- * assignments. The API also exposes validation endpoints so signer UIs can
- * validate single or multiple field values before submitting a signature.
+ * assignments. The validation endpoints check values against a definition
+ * with the workspace's credentials (API key or bearer token).
  *
  * @see https://api.assinafy.com.br/v1/docs
  */
 
 import { withQuery, type HttpClient } from "./http.js";
+import { ConfigurationError } from "./errors.js";
 import type {
   CreateFieldInput,
   FieldDefinition,
@@ -35,12 +36,20 @@ const paths = {
 export class FieldsResource {
   constructor(private readonly http: HttpClient) {}
 
-  /** Create a field definition. */
+  /**
+   * `POST /accounts/{accountId}/fields` — create a field definition.
+   * Request sent: `{ name, type, regex?, is_required? }`. Response:
+   * {@link FieldDefinition}.
+   */
   create(accountId: string, input: CreateFieldInput): Promise<FieldDefinition> {
-    return this.http.post<FieldDefinition>(paths.collection(accountId), input);
+    const { name, type, regex, is_required } = input;
+    return this.http.post<FieldDefinition>(paths.collection(accountId), { name, type, regex, is_required });
   }
 
-  /** List field definitions, optionally including inactive or standard fields. */
+  /**
+   * `GET /accounts/{accountId}/fields` — list field definitions. Query:
+   * `include_inactive`, `include_standard`. Response: `Page<FieldDefinition>`.
+   */
   list(accountId: string, query: ListFieldsQuery = {}): Promise<Page<FieldDefinition>> {
     return this.http.getPage<FieldDefinition>(
       withQuery(paths.collection(accountId), {
@@ -50,52 +59,79 @@ export class FieldsResource {
     );
   }
 
-  /** Fetch one field definition by id. */
+  /** `GET /accounts/{accountId}/fields/{fieldId}` — one {@link FieldDefinition}. */
   get(accountId: string, fieldId: string): Promise<FieldDefinition> {
     return this.http.get<FieldDefinition>(paths.item(accountId, fieldId));
   }
 
-  /** Update a field definition. Omitted fields are left unchanged. */
+  /**
+   * `PUT /accounts/{accountId}/fields/{fieldId}` — update a field definition.
+   * Request sent: `{ name?, regex?, is_active? }`; omitted fields are left
+   * unchanged. Response: {@link FieldDefinition}.
+   */
   update(accountId: string, fieldId: string, input: UpdateFieldInput): Promise<FieldDefinition> {
-    return this.http.put<FieldDefinition>(paths.item(accountId, fieldId), input);
+    const { name, regex, is_active } = input;
+    return this.http.put<FieldDefinition>(paths.item(accountId, fieldId), { name, regex, is_active });
   }
 
-  /** Delete a field definition. The API rejects fields already used by documents. */
+  /** `DELETE /accounts/{accountId}/fields/{fieldId}` — the API rejects fields already used by documents. */
   async remove(accountId: string, fieldId: string): Promise<void> {
     await this.http.delete<unknown>(paths.item(accountId, fieldId));
   }
 
-  /** Validate one value against a field definition. */
-  validate(
+  /**
+   * `POST /accounts/{accountId}/fields/{fieldId}/validate` — validate one
+   * value with the workspace's credentials. Request: `{ value }`. Response:
+   * `{ type, success, error_message }`.
+   *
+   * The operation does not accept a signer access code: passing
+   * `options.accessCode` rejects with {@link ConfigurationError} instead of
+   * silently validating with the workspace's credentials.
+   */
+  async validate(
     accountId: string,
     fieldId: string,
     value: unknown,
-    options: { accessCode?: string } = {},
+    options: WorkspaceOnlyOptions = {},
   ): Promise<FieldValidationResult> {
-    return this.http.post<FieldValidationResult>(
-      withQuery(paths.validate(accountId, fieldId), {
-        "signer-access-code": options.accessCode,
-      }),
-      { value },
-    );
+    rejectAccessCode(options);
+    return this.http.post<FieldValidationResult>(paths.validate(accountId, fieldId), { value });
   }
 
-  /** Validate multiple values in one request. */
-  validateMultiple(
+  /**
+   * `POST /accounts/{accountId}/fields/validate-multiple` — validate several
+   * values with the workspace's credentials. Request: `[{ field_id, value }]`.
+   * Response: `[{ field_id, type, success, error_message }]`. Rejects
+   * `options.accessCode` like {@link validate}.
+   */
+  async validateMultiple(
     accountId: string,
     entries: ValidateFieldEntry[],
-    options: { accessCode?: string } = {},
+    options: WorkspaceOnlyOptions = {},
   ): Promise<FieldValidationResult[]> {
-    return this.http.post<FieldValidationResult[]>(
-      withQuery(paths.validateMultiple(accountId), {
-        "signer-access-code": options.accessCode,
-      }),
-      entries,
-    );
+    rejectAccessCode(options);
+    return this.http.post<FieldValidationResult[]>(paths.validateMultiple(accountId), entries);
   }
 
-  /** List all supported field types. */
+  /** `GET /field-types` — supported field types: `[{ type, name }]`. */
   listTypes(): Promise<FieldType[]> {
     return this.http.get<FieldType[]>(paths.types());
+  }
+}
+
+/** Options of the field validation methods. */
+interface WorkspaceOnlyOptions {
+  /**
+   * @deprecated Field validation authenticates with the workspace's
+   * credentials only; a signer access code is rejected.
+   */
+  accessCode?: string;
+}
+
+function rejectAccessCode(options: WorkspaceOnlyOptions): void {
+  if (options.accessCode !== undefined) {
+    throw new ConfigurationError(
+      "Field validation uses the workspace's credentials and does not accept a signer access code",
+    );
   }
 }

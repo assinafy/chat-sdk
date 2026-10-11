@@ -206,7 +206,7 @@ export interface RecoveryCodes {
 
 /** Social-provider login request. */
 export interface SocialLoginInput {
-  provider: string;
+  provider: "google" | (string & {});
   token: string | Record<string, unknown>;
   has_accepted_terms: boolean;
 }
@@ -331,18 +331,18 @@ export interface SignerSelf extends Signer {
   is_signature_reusable: boolean;
 }
 
-/** Signer creation request. */
+/** Signer creation request: `{ full_name, email?, whatsapp_phone_number?, government_id? }`. */
 export interface CreateSignerInput {
   full_name: string;
   email?: string;
+  /** Required for WhatsApp verification or notification. */
   whatsapp_phone_number?: string;
-}
-
-/** Signer update request. */
-export interface UpdateSignerInput extends Partial<CreateSignerInput> {
-  /** CPF/CNPJ; the API normalizes it to digits. */
+  /** CPF/CNPJ; the API normalizes it to digits. Required for `DigitalCertificate` signers. */
   government_id?: string;
 }
+
+/** Signer update request — every {@link CreateSignerInput} field, all optional. */
+export type UpdateSignerInput = Partial<CreateSignerInput>;
 
 /** Query accepted by signer list endpoints. */
 export interface ListSignersQuery {
@@ -353,17 +353,20 @@ export interface ListSignersQuery {
 }
 
 /**
- * Signer data-confirmation request. The documented body accepts `full_name`,
- * `email`, and `government_id`; `whatsapp_phone_number` and `has_accepted_terms`
- * are retained for callers that relied on them but are not part of the
- * documented contract.
+ * Signer data-confirmation request. The operation's body is
+ * `{ full_name?, email?, government_id? }`.
  */
 export interface SignerSelfConfirmDataInput {
   full_name?: string;
   email?: string;
   /** Government identification number (e.g. CPF). */
   government_id?: string;
+  /** @deprecated Not accepted by the confirm-data operation; ignored. */
   whatsapp_phone_number?: string;
+  /**
+   * `true` accepts the terms of use through the separate accept-terms
+   * operation right after the confirmation. Not part of the confirm-data body.
+   */
   has_accepted_terms?: boolean;
 }
 
@@ -542,7 +545,9 @@ export interface ListDocumentsQuery {
 }
 
 /**
- * Query accepted by signer-facing document lists.
+ * Query accepted by signer-facing document lists. Only `search`, `sort`,
+ * `page` and `perPage` are sent; `status`, `method` and `tags` are not part of
+ * that operation and are ignored.
  */
 export type ListSignerDocumentsQuery = ListDocumentsQuery;
 
@@ -568,6 +573,10 @@ export interface UploadDocumentInput {
   filename: string;
   body: Blob | ArrayBuffer | Uint8Array;
   contentType?: string;
+  /**
+   * @deprecated The upload operation takes only `file`; this is ignored. Attach
+   * tags after the upload with `tags.addToDocument`.
+   */
   tags?: string[];
 }
 
@@ -585,23 +594,22 @@ export interface DocumentActivity {
 }
 
 /**
- * Public document token request. Supply either an email or an explicit
- * recipient/channel pair.
+ * Public document token request: `{ channel: "email", recipient }`, where
+ * `recipient` is the email of a signer who has not signed yet. Email is the
+ * only channel.
  */
 export type SendPublicTokenInput =
-  | { email: string; recipient?: never; channel?: never }
+  | { channel: "email"; recipient: string }
   | {
-      recipient: string;
-      channel: "email" | "whatsapp" | (string & {});
-      email?: never;
+      /** @deprecated Use `{ channel: "email", recipient }`; sent in that form. */
+      email: string;
     };
 
-/** Public-token response payload when the API returns delivery details. */
+/** Public-token response: the document summary plus where the token went. */
 export interface SendPublicTokenResult {
-  document?: PublicDocument | Record<string, unknown>;
-  channel?: string;
-  recipient?: string;
-  [key: string]: unknown;
+  document: PublicDocument;
+  channel: "email" | (string & {});
+  recipient: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -694,11 +702,17 @@ interface TemplateSignerOptions {
   notification_methods?: NotificationMethod[];
 }
 
-/** Signer binding used when creating a document from a template. */
+/**
+ * Signer binding used when creating a document from a template:
+ * `{ role_id, id, verification_method?, notification_methods?, step? }`.
+ */
 export type TemplateSignerInput =
   | (TemplateSignerOptions & { role_id: string; id: string })
   | (TemplateSignerOptions & {
-      /** @deprecated Use an existing signer `id`. */
+      /**
+       * @deprecated The operation binds existing signers by `role_id` + `id`;
+       * `full_name`, `email` and `whatsapp_phone_number` are not sent.
+       */
       full_name: string;
       role_id?: string;
       id?: string;
@@ -823,7 +837,7 @@ export type CreateAssignmentInput = CreateAssignmentOptions &
 
 /** Per-signer input accepted by assignment cost estimation (no signer ID needed). */
 export interface EstimateAssignmentSignerInput {
-  /** Existing signer id, when estimating for a saved signer. */
+  /** @deprecated Signer ids do not affect cost and are not sent. */
   id?: string;
   verification_method?: VerificationMethod;
   notification_methods?: NotificationMethod[];
@@ -910,17 +924,17 @@ export interface CreateFieldInput {
   name: string;
   regex?: string | null;
   is_required?: boolean;
-  /** @deprecated The create endpoint does not document this field; use update after creation. */
+  /** @deprecated Not part of the create operation; ignored. Use update after creation. */
   is_active?: boolean;
 }
 
 /** Field-definition update request. */
 export interface UpdateFieldInput {
-  /** @deprecated The update endpoint does not document changing a field type. */
+  /** @deprecated Not part of the update operation; ignored. */
   type?: string;
   name?: string;
   regex?: string | null;
-  /** @deprecated The update endpoint does not document changing requiredness. */
+  /** @deprecated Not part of the update operation; ignored. */
   is_required?: boolean;
   is_active?: boolean;
 }

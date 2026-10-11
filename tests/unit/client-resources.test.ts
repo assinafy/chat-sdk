@@ -170,14 +170,35 @@ describe("AssinafyClient resource paths", () => {
         signers: [{ id: "s1" }],
       } as never),
     ).rejects.toThrow("at least one field entry");
-    // The API prices per signer in both modes and refuses a signer-less estimate.
+    // `signers` is required for virtual (and an omitted method), `entries` for collect.
+    await expect(client.assignments.estimateCost("doc", { method: "virtual" })).rejects.toThrow(
+      "at least one signer",
+    );
+    await expect(client.assignments.estimateCost("doc", {})).rejects.toThrow("at least one signer");
     await expect(
-      client.assignments.estimateCost("doc", {
-        method: "collect",
-        entries: [{ page_id: "p1", fields: [] }],
-      } as never),
-    ).rejects.toThrow("at least one signer");
+      client.assignments.estimateCost("doc", { method: "collect", signers: [{}] }),
+    ).rejects.toThrow("entries for collect");
     expect(requests).toHaveLength(0);
+  });
+
+  it("sends only the priced signer settings in an assignment estimate", async () => {
+    const { client, requests } = makeClient([{}, {}]);
+
+    await client.assignments.estimateCost("doc", {
+      method: "virtual",
+      signers: [{ id: "s1", verification_method: "Whatsapp" }],
+      signer_ids: ["s1", "s2"],
+    });
+    await client.assignments.estimateCost("doc", {
+      method: "collect",
+      entries: [{ page_id: "p1", fields: [] }],
+    });
+
+    expect(requests[0]!.body).toEqual({
+      method: "virtual",
+      signers: [{ verification_method: "Whatsapp" }, {}],
+    });
+    expect(requests[1]!.body).toEqual({ method: "collect", entries: [{ page_id: "p1", fields: [] }] });
   });
 
   it("sends signers alongside entries for a collect estimate", async () => {
@@ -197,12 +218,16 @@ describe("AssinafyClient resource paths", () => {
   });
 
   it("covers assignment resend, resend-estimate, reset-expiration, and notifications", async () => {
-    const { client, requests } = makeClient([{}, {}, {}, []]);
+    const { client, requests } = makeClient([{}, {}, {}, [], {}]);
 
     await client.assignments.resendToSigner("doc 1", "asn 1", "s1");
     await client.assignments.estimateResendCost("doc 1", "asn 1", "s1");
     await client.assignments.resetExpiration("doc 1", "asn 1", "2030-08-03T21:00:00Z");
     await client.assignments.whatsappNotifications("doc 1", "asn 1");
+    await client.assignments.resetExpiration("doc 1", "asn 1", null);
+    await expect(
+      client.assignments.resetExpiration("doc 1", "asn 1", undefined as unknown as string),
+    ).rejects.toThrow(ConfigurationError);
 
     expect(requests[0]!.method).toBe("PUT");
     expect(new URL(requests[0]!.url).pathname).toBe("/v1/documents/doc%201/assignments/asn%201/signers/s1/resend");
@@ -217,9 +242,12 @@ describe("AssinafyClient resource paths", () => {
     expect(new URL(requests[3]!.url).pathname).toBe(
       "/v1/documents/doc%201/assignments/asn%201/whatsapp-notifications",
     );
+    // `null` clears the expiration; the key is always present.
+    expect(requests[4]!.body).toEqual({ expires_at: null });
+    expect(requests).toHaveLength(5);
   });
 
-  it("serializes documented CSV tag filters for documents and templates", async () => {
+  it("serializes CSV document filters and sends only declared template list parameters", async () => {
     const { client, requests } = makeClient([[], []]);
 
     await client.documents.list("acct", {
@@ -234,7 +262,7 @@ describe("AssinafyClient resource paths", () => {
       "metadata_ready,pending_signature",
     );
     expect(new URL(requests[0]!.url).searchParams.get("per-page")).toBe("10");
-    expect(new URL(requests[1]!.url).searchParams.get("tags")).toBe("tag1,tag2");
+    expect(new URL(requests[1]!.url).searchParams.has("tags")).toBe(false);
     expect(new URL(requests[1]!.url).searchParams.get("sort")).toBe("-updated_at");
   });
 
@@ -256,15 +284,36 @@ describe("AssinafyClient resource paths", () => {
     expect(requests[2]!.body).toEqual({ signers: [{ role_id: "role1" }] });
   });
 
+  it("sends template signers and editor fields in the published shape", async () => {
+    const { client, requests } = makeClient([{}]);
+
+    await client.templates.instantiate("acct", "tpl", {
+      signers: [
+        { role_id: "r1", id: "s1", step: 2, email: "signer@example.com", full_name: "Legacy" } as never,
+      ],
+      editor_fields: { f1: "value", f2: 42 },
+      name: "Contract",
+    });
+
+    expect(requests[0]!.body).toEqual({
+      signers: [{ role_id: "r1", id: "s1", step: 2 }],
+      editor_fields: [
+        { field_id: "f1", value: "value" },
+        { field_id: "f2", value: "42" },
+      ],
+      name: "Contract",
+    });
+  });
+
   it("covers field CRUD and validation endpoint shapes", async () => {
     const { client, requests } = makeClient([{}, [], {}, {}, {}, {}, [], []]);
 
-    await client.fields.create("acct", { type: "text", name: "Reference" });
+    await client.fields.create("acct", { type: "text", name: "Reference", is_active: true });
     await client.fields.list("acct", { include_standard: true, include_inactive: true });
     await client.fields.get("acct", "field 1");
-    await client.fields.update("acct", "field 1", { name: "Reference ID" });
-    await client.fields.validate("acct", "field 1", "abc", { accessCode: "code" });
-    await client.fields.validateMultiple("acct", [{ field_id: "field 1", value: "abc" }], { accessCode: "code" });
+    await client.fields.update("acct", "field 1", { name: "Reference ID", regex: null, type: "cpf" });
+    await client.fields.validate("acct", "field 1", "abc");
+    await client.fields.validateMultiple("acct", [{ field_id: "field 1", value: "abc" }]);
     await client.fields.listTypes();
     await client.fields.remove("acct", "field 1");
 
@@ -280,8 +329,23 @@ describe("AssinafyClient resource paths", () => {
     ]);
     expect(new URL(requests[1]!.url).searchParams.get("include_standard")).toBe("true");
     expect(new URL(requests[1]!.url).searchParams.has("per-page")).toBe(false);
-    expect(new URL(requests[4]!.url).searchParams.get("signer-access-code")).toBe("code");
+    expect(requests[0]!.body).toEqual({ type: "text", name: "Reference" });
+    expect(requests[3]!.body).toEqual({ name: "Reference ID", regex: null });
+    expect(new URL(requests[4]!.url).search).toBe("");
+    expect(new Headers(requests[4]!.init.headers).get("x-api-key")).toBe("test-key");
     expect(requests[5]!.body).toEqual([{ field_id: "field 1", value: "abc" }]);
+  });
+
+  it("rejects a signer access code on the workspace-only field validation", async () => {
+    const { client, requests } = makeClient();
+
+    await expect(client.fields.validate("acct", "f", "x", { accessCode: "code" })).rejects.toThrow(
+      ConfigurationError,
+    );
+    await expect(
+      client.fields.validateMultiple("acct", [{ field_id: "f", value: "x" }], { accessCode: "" }),
+    ).rejects.toThrow(ConfigurationError);
+    expect(requests).toHaveLength(0);
   });
 
   it("covers webhook subscription, event type, dispatch, and retry paths", async () => {
@@ -391,7 +455,7 @@ describe("AssinafyClient resource paths", () => {
     expect(new URL(requests[0]!.url).pathname).toBe("/v1/sign");
     expect(new URL(requests[0]!.url).searchParams.get("has_accepted_terms")).toBe("true");
     expect(new URL(requests[1]!.url).pathname).toBe("/v1/signers/signer%201/documents");
-    expect(new URL(requests[1]!.url).searchParams.get("tags")).toBe("tag1,tag2");
+    expect([...new URL(requests[1]!.url).searchParams.keys()]).toEqual(["signer-access-code"]);
     expect(requests[2]!.body).toEqual({ document_ids: ["doc1", "doc2"] });
     expect(requests[3]!.body).toEqual({ document_ids: ["doc1"], decline_reason: "No" });
     expect(new URL(requests[4]!.url).pathname).toBe("/v1/signers/signer%201/documents/doc%201/download/original");
@@ -420,7 +484,11 @@ describe("AssinafyClient resource paths", () => {
     await client.signers.get("acct", "s 1");
     await client.signers.update("acct", "s 1", { full_name: "Alice B" });
     await client.signers.remove("acct", "s 1");
-    await client.signers.confirmDataForDocument("doc 1", "code", { government_id: "123" });
+    await client.signers.confirmDataForDocument("doc 1", "code", {
+      government_id: "123",
+      whatsapp_phone_number: "+5511999999999",
+      has_accepted_terms: true,
+    });
 
     expect(requests.map((r) => `${r.method} ${new URL(r.url).pathname}`)).toEqual([
       "GET /v1/accounts/acct/signers",
@@ -429,10 +497,12 @@ describe("AssinafyClient resource paths", () => {
       "PUT /v1/accounts/acct/signers/s%201",
       "DELETE /v1/accounts/acct/signers/s%201",
       "PUT /v1/documents/doc%201/signers/confirm-data",
+      "PUT /v1/signers/accept-terms",
     ]);
     expect(new URL(requests[0]!.url).searchParams.get("per-page")).toBe("5");
     expect(new URL(requests[5]!.url).searchParams.get("signer-access-code")).toBe("code");
     expect(requests[5]!.body).toEqual({ government_id: "123" });
+    expect(new URL(requests[6]!.url).searchParams.get("signer-access-code")).toBe("code");
   });
 
   it("preserves nullable assignment-signer notification history", async () => {
@@ -469,57 +539,94 @@ describe("AssinafyClient resource paths", () => {
     expect(requests[1]!.body).toEqual({ "verification-code": "123456" });
   });
 
-  it("sends the documented {email} body for sendPublicToken", async () => {
-    const { client, requests } = makeClient([{}]);
+  it("sends the published send-token body and maps the legacy email form", async () => {
+    const { client, requests } = makeClient([{}, {}]);
 
-    await client.documents.sendPublicToken("doc 1", { email: "a@example.com" });
+    await client.documents.sendPublicToken("doc 1", { channel: "email", recipient: "signer@example.com" });
+    await client.documents.sendPublicToken("doc 1", { email: "signer@example.com" });
 
     expect(requests[0]!.method).toBe("PUT");
     expect(new URL(requests[0]!.url).pathname).toBe("/v1/public/documents/doc%201/send-token");
-    expect(requests[0]!.body).toEqual({ email: "a@example.com" });
+    expect(requests[0]!.body).toEqual({ channel: "email", recipient: "signer@example.com" });
+    expect(requests[1]!.body).toEqual({ channel: "email", recipient: "signer@example.com" });
   });
 
-  it("allows the documented public-token request without a body", async () => {
-    const { client, requests } = makeClient([{}]);
+  it("rejects send-token requests outside the published contract before transport", async () => {
+    const { client, requests } = makeClient();
 
-    await client.documents.sendPublicToken("doc 1");
-
-    expect(requests[0]!.method).toBe("PUT");
-    expect(requests[0]!.body).toBeUndefined();
-    expect(new Headers(requests[0]!.init.headers).has("content-type")).toBe(false);
+    await expect(client.documents.sendPublicToken("doc", undefined as never)).rejects.toThrow(ConfigurationError);
+    await expect(
+      client.documents.sendPublicToken("doc", { channel: "whatsapp", recipient: "+5511999999999" } as never),
+    ).rejects.toThrow('only channel "email"');
+    await expect(client.documents.sendPublicToken("doc", { channel: "email", recipient: " " })).rejects.toThrow(
+      "recipient",
+    );
+    expect(requests).toHaveLength(0);
   });
 
-  it("never retries a rejected notification request and supports an explicit legacy body", async () => {
-    const bodies: unknown[] = [];
-    const fetchImpl = vi.fn().mockImplementationOnce(async (_url: string, init: RequestInit) => {
-      bodies.push(JSON.parse(init.body as string));
-      return new Response(
-        JSON.stringify({ status: 422, message: "invalid request", data: null }),
-        { status: 422, headers: { "content-type": "application/json" } },
-      );
-    }).mockImplementationOnce(async (_url: string, init: RequestInit) => {
-      bodies.push(JSON.parse(init.body as string));
-      return mkResponse({ recipient: "a@example.com", channel: "email" });
-    });
+  it("never retries a rejected notification request", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ status: 400, message: "invalid request", data: null }), {
+        status: 400,
+        headers: { "content-type": "application/json" },
+      }),
+    );
     const client = new AssinafyClient({
       baseUrl: "https://sandbox.test/v1",
       fetch: fetchImpl as unknown as typeof fetch,
-      maxRetries: 0,
+      maxRetries: 2,
     });
 
     await expect(
-      client.documents.sendPublicToken("doc", { email: "a@example.com" }),
-    ).rejects.toMatchObject({ status: 422 });
+      client.documents.sendPublicToken("doc", { channel: "email", recipient: "signer@example.com" }),
+    ).rejects.toMatchObject({ status: 400 });
     expect(fetchImpl).toHaveBeenCalledOnce();
+  });
 
-    await client.documents.sendPublicToken("doc", {
-      recipient: "a@example.com",
-      channel: "email",
-    });
-    expect(bodies).toEqual([
-      { email: "a@example.com" },
-      { recipient: "a@example.com", channel: "email" },
-    ]);
+  it("sends signer operations with the access code only and rejects a blank code", async () => {
+    const { client, requests } = makeClient([{}, [], []]);
+
+    await client.signature.self("the-code");
+    await client.signature.listDocumentsAsWorkspace("signer 1", { search: "nda", status: "certificated" });
+    await client.signature.searchDocumentsAsWorkspace("signer 1", "nda");
+
+    const signerHeaders = new Headers(requests[0]!.init.headers);
+    expect(signerHeaders.has("x-api-key")).toBe(false);
+    expect(signerHeaders.has("authorization")).toBe(false);
+    expect(new URL(requests[0]!.url).searchParams.get("signer-access-code")).toBe("the-code");
+    for (const request of requests.slice(1)) {
+      expect(new Headers(request.init.headers).get("x-api-key")).toBe("test-key");
+      expect(new URL(request.url).searchParams.has("signer-access-code")).toBe(false);
+    }
+    expect(new URL(requests[1]!.url).pathname).toBe("/v1/signers/signer%201/documents");
+    expect([...new URL(requests[1]!.url).searchParams.keys()]).toEqual(["search"]);
+    expect(new URL(requests[2]!.url).pathname).toBe("/v1/signers/signer%201/documents/search");
+
+    const png = new Uint8Array([1]);
+    const blankCodeCalls: Array<(code: string) => Promise<unknown>> = [
+      (code) => client.signature.self(code),
+      (code) => client.signature.acceptTerms(code),
+      (code) => client.signature.verify(code, "123456"),
+      (code) => client.signature.upload(code, png),
+      (code) => client.signature.download(code, "signature"),
+      (code) => client.signature.signContext(code),
+      (code) => client.signature.currentDocument("s", code),
+      (code) => client.signature.listDocuments("s", code),
+      (code) => client.signature.searchDocuments("s", code),
+      (code) => client.signature.sign("d", "a", code, []),
+      (code) => client.signature.decline("d", "a", code, "no"),
+      (code) => client.signature.signMultiple(code, ["d"]),
+      (code) => client.signature.declineMultiple(code, ["d"], "no"),
+      (code) => client.signers.confirmDataForDocument("d", code, {}),
+      (code) => client.assignments.sign("d", "a", code, []),
+      (code) => client.assignments.decline("d", "a", code, "no"),
+    ];
+    for (const call of blankCodeCalls) {
+      for (const code of ["", "   ", undefined as unknown as string]) {
+        await expect(call(code)).rejects.toThrow(ConfigurationError);
+      }
+    }
+    expect(requests).toHaveLength(3);
   });
 
   it("covers document search and rename", async () => {
@@ -680,7 +787,7 @@ describe("AssinafyClient resource paths", () => {
     await client.documents.activities("doc 1");
     await client.documents.verify("signature hash");
     await client.documents.publicGet("doc 1");
-    await client.documents.sendPublicToken("doc 1", { email: "signer@example.com" });
+    await client.documents.sendPublicToken("doc 1", { channel: "email", recipient: "signer@example.com" });
     await client.documents.statuses();
     await client.documents.remove("doc 1");
 
@@ -697,7 +804,10 @@ describe("AssinafyClient resource paths", () => {
       "GET /v1/documents/statuses",
       "DELETE /v1/documents/doc%201",
     ]);
-    expect(requests[0]!.body).toBeInstanceOf(FormData);
+    const form = requests[0]!.body as FormData;
+    expect(form).toBeInstanceOf(FormData);
+    // The upload operation takes a single `file` part; the deprecated tags are not sent.
+    expect([...form.keys()]).toEqual(["file"]);
   });
 
   it("honors upload MIME overrides and rejects files over 25 MB before transport", async () => {

@@ -46,15 +46,20 @@ const paths = {
     `/public/documents/${encodeURIComponent(documentId)}/send-token`,
 };
 
+/** Document upload, listing, artifacts, verification and the public document routes (`client.documents`). */
 export class DocumentsResource {
   constructor(private readonly http: HttpClient) {}
 
-  /** List the canonical document status codes plus their `deletable` flag. */
+  /** `GET /documents/statuses` — `[{ code, deletable }]` for every document status. */
   statuses(): Promise<DocumentStatus[]> {
     return this.http.get<DocumentStatus[]>(paths.statuses());
   }
 
-  /** List documents for an account, with optional filters. */
+  /**
+   * `GET /accounts/{accountId}/documents` — query `status`, `method`,
+   * `search`, `tags`, `sort`, `page`, `per-page` (array filters are joined
+   * with commas). Response: `Page<Document>`.
+   */
   async list(accountId: string, query: ListDocumentsQuery = {}): Promise<Page<Document>> {
     return this.http.getPage<Document>(
       withQuery(paths.collection(accountId), {
@@ -69,7 +74,8 @@ export class DocumentsResource {
   }
 
   /**
-   * Lightweight document search. Returns a compact document representation
+   * `GET /accounts/{accountId}/documents/search` — query `search`, `status`,
+   * `page`, `per-page`. Returns a compact document representation
    * (no expanded assignment/pages) — cheaper than {@link list} when you only
    * need to resolve names/ids.
    */
@@ -83,7 +89,7 @@ export class DocumentsResource {
     );
   }
 
-  /** Iterate through every document, automatically paging. */
+  /** Page through every document of {@link list} lazily (50 per request by default). */
   async *iterate(accountId: string, query: ListDocumentsQuery = {}): AsyncIterableIterator<Document> {
     let page = query.page ?? 1;
     const perPage = query.perPage ?? 50;
@@ -96,7 +102,10 @@ export class DocumentsResource {
   }
 
   /**
-   * Upload a new document under an account.
+   * `POST /accounts/{accountId}/documents` — upload a document as
+   * `multipart/form-data` with a single `file` part. Response: the new
+   * {@link Document} (status `uploaded`, then `metadata_processing` →
+   * `metadata_ready`).
    *
    * Assinafy accepts files up to 25 MB and documents up to 2,000 pages.
    * The body can be a Blob (Browser / Bun), an ArrayBuffer, or a Uint8Array
@@ -111,9 +120,6 @@ export class DocumentsResource {
     const form = new FormData();
     const blob = toUploadBlob(input.body, input.contentType, "application/pdf");
     form.append("file", blob, input.filename);
-    if (input.tags) {
-      for (const tag of input.tags) form.append("tags[]", tag);
-    }
     // `request` rather than `post`: the body is multipart, so the runtime must
     // generate the boundary and set `content-type` itself.
     const response = await this.http.request<Document>(paths.collection(accountId), {
@@ -123,13 +129,14 @@ export class DocumentsResource {
     return response.data;
   }
 
-  /** Fetch a single document by id. */
+  /** `GET /documents/{documentId}` — one {@link Document}, with its assignment and pages. */
   get(documentId: string): Promise<Document> {
     return this.http.get<Document>(paths.item(documentId));
   }
 
   /**
-   * Rename a document. Only allowed before any assignment exists (status
+   * `PATCH /documents/{documentId}` — request `{ name }`; response: the
+   * renamed {@link Document}. Only allowed before any assignment exists (status
    * `uploaded` or `metadata_ready` with no signers); once the signature process
    * has started or the document is certificated, the name is locked. The API
    * normalizes the name (diacritics removed, unsupported characters replaced
@@ -139,49 +146,72 @@ export class DocumentsResource {
     return this.http.patch<Document>(paths.item(documentId), { name } satisfies RenameDocumentInput);
   }
 
-  /** Delete a document. Only available when its current status is `deletable`. */
+  /** `DELETE /documents/{documentId}` — only when its current status is `deletable`. */
   async remove(documentId: string): Promise<void> {
     await this.http.delete<unknown>(paths.item(documentId));
   }
 
   /**
-   * Download a specific artifact (e.g. `original`, `certificated`).
+   * `GET /documents/{documentId}/download/{artifactName}` — download an
+   * artifact: `original`, `certificated`, `certificate-page`, `pades` or `bundle`.
    * Returns a `Response` so callers can stream, buffer, or pipe as they like.
    */
   download(documentId: string, artifactName: DocumentArtifactName): Promise<Response> {
     return this.http.rawRequest(paths.download(documentId, artifactName));
   }
 
-  /** Download the document thumbnail as an image `Response`. */
+  /** `GET /documents/{documentId}/thumbnail` — the thumbnail image as a raw `Response`. */
   thumbnail(documentId: string): Promise<Response> {
     return this.http.rawRequest(paths.thumbnail(documentId));
   }
 
-  /** Download a single page as an image `Response`. */
+  /** `GET /documents/{documentId}/pages/{pageId}/download` — one page image as a raw `Response`. */
   downloadPage(documentId: string, pageId: string): Promise<Response> {
     return this.http.rawRequest(paths.page(documentId, pageId));
   }
 
-  /** Activity log for a document (signed events, notifications, declines, …). */
+  /**
+   * `GET /documents/{documentId}/activities` — the activity log:
+   * `[{ id, event, message, payload, origin, created_at }]` (`origin` holds the request IP).
+   */
   activities(documentId: string): Promise<DocumentActivity[]> {
     return this.http.get<DocumentActivity[]>(paths.activities(documentId));
   }
 
-  /** Public, unauthenticated verification by signature hash. */
+  /**
+   * `GET /documents/{documentSignatureHash}/verify` — public verification.
+   * Response: `{ hash, id, agreement_code, status, page_count, signer_count,
+   * completed_count, completed_at, verified_at, is_valid, message }`.
+   */
   verify(signatureHash: string): Promise<DocumentVerificationResult> {
     return this.http.get<DocumentVerificationResult>(paths.verify(signatureHash));
   }
 
-  /** Public, unauthenticated fetch of a document by id (used by signer UIs). */
+  /** `GET /public/documents/{documentId}` — public read of a document (used by signer UIs). */
   publicGet(documentId: string): Promise<Document | PublicDocument> {
     return this.http.get<Document | PublicDocument>(paths.publicGet(documentId));
   }
 
-  /** Public: ask Assinafy to send a document access token. */
-  sendPublicToken(
-    documentId: string,
-    input?: SendPublicTokenInput,
-  ): Promise<SendPublicTokenResult | undefined> {
-    return this.http.put<SendPublicTokenResult | undefined>(paths.sendToken(documentId), input);
+  /**
+   * `PUT /public/documents/{documentId}/send-token` — email a one-time access
+   * token to a signer of a pending public document. Public: no credential.
+   *
+   * Request: `{ channel: "email", recipient: "<signer email>" }` — both
+   * required; `email` is the only channel, and `recipient` must be a signer of
+   * the document who has not signed yet. The deprecated `{ email }` form is
+   * sent as `{ channel: "email", recipient: email }`. Response:
+   * `{ document: { resource, id, name, page_count, created_by }, channel,
+   * recipient }`.
+   */
+  async sendPublicToken(documentId: string, input: SendPublicTokenInput): Promise<SendPublicTokenResult> {
+    const recipient = input && ("email" in input ? input.email : input.recipient);
+    const channel = input && ("email" in input ? "email" : input.channel);
+    if (channel !== "email") {
+      throw new ConfigurationError('sendPublicToken supports only channel "email"');
+    }
+    if (typeof recipient !== "string" || recipient.trim() === "") {
+      throw new ConfigurationError("sendPublicToken requires the signer's email as recipient");
+    }
+    return this.http.put<SendPublicTokenResult>(paths.sendToken(documentId), { channel, recipient });
   }
 }

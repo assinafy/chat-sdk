@@ -464,7 +464,10 @@ Abortar via `RequestInit.signal` cancela também uma espera de retry em curso.
 
 Passe `onRateLimit` para observar os metadados `X-Rate-Limit-*` conforme
 chegam; uma exceção lançada por esse observador é engolida, para que nunca
-transforme uma requisição bem-sucedida em falha.
+transforme uma requisição bem-sucedida em falha. Uma requisição que falha traz
+os mesmos dados em `ApiError.rateLimit`, e um `429` traz também
+`ApiError.retryAfterSeconds`, lido do cabeçalho `Retry-After` — aguarde esse
+tempo antes de repetir uma chamada que muta.
 
 ---
 
@@ -625,7 +628,8 @@ await client.assignments.create(documento.id, {
 As definições de campo em si são no escopo da conta e reutilizáveis — crie-as
 com `client.fields.create()`, liste os tipos disponíveis com
 `client.fields.listTypes()` e valide valores antes do envio com
-`client.fields.validate()` ou `validateMultiple()`.
+`client.fields.validate()` ou `validateMultiple()` (apenas com as credenciais
+do workspace; rejeitam um código de acesso de signatário).
 
 ### Templates dispensam o upload
 
@@ -741,18 +745,28 @@ por vez ou vários de uma vez. Signatários por certificado digital precisam
 confirmar seus dados e aceitar os termos antes de pedir o contexto de
 assinatura, o que `client.signers.confirmDataForDocument()` faz numa chamada só.
 
+Todo método que recebe um código de acesso rejeita um código ausente ou em
+branco antes de enviar qualquer coisa e nunca anexa a API key nem o bearer token
+do cliente. Para ler os documentos de um signatário com as credenciais do seu
+workspace, use `client.signature.listDocumentsAsWorkspace()` e
+`searchDocumentsAsWorkspace()`.
+
 Documentos também podem ser liberados sem código algum:
 `client.documents.publicGet()` busca um resumo público,
 `client.documents.verify()` valida um hash de assinatura sem credencial, e
-`client.documents.sendPublicToken()` pede à Assinafy que entregue um novo token
-de acesso:
+`client.documents.sendPublicToken()` pede à Assinafy que envie por e-mail um
+novo token de acesso a um signatário do documento pendente que ainda não
+assinou:
 
 ```ts
-await publicClient.documents.sendPublicToken(documentId, { email: "signatario@example.test" });
+await publicClient.documents.sendPublicToken(documentId, {
+  channel: "email",
+  recipient: "signatario@example.test",
+});
 ```
 
-Essa requisição é enviada exatamente uma vez e nunca repetida, porque pode
-disparar um e-mail ou uma mensagem de WhatsApp.
+O e-mail é o único canal desse token. A requisição é enviada exatamente uma vez
+e nunca repetida, porque dispara um e-mail.
 
 ### Trate códigos de acesso como credenciais
 

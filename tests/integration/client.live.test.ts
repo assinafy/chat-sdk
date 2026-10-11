@@ -7,7 +7,7 @@
  * credentials.
  */
 import { afterAll, describe, it, expect } from "vitest";
-import { ApiError, AssinafyClient } from "../../src/client/index.js";
+import { ApiError, AssinafyClient, ConfigurationError } from "../../src/client/index.js";
 import { loadEnv, makeMinimalPdf } from "../setup.js";
 
 const env = loadEnv();
@@ -508,6 +508,49 @@ describeLive("Assinafy API — live sandbox", () => {
     await waitForDocument(doc.id, (document) => document.status === "rejected_by_signer");
     await client.documents.remove(doc.id);
     await expect(client.documents.get(doc.id)).rejects.toMatchObject({ status: 404 });
+  }, 60_000);
+
+  it("assignment expiration, public token, signer documents and estimates follow the published contract", async () => {
+    // example.com recipients only: the assignment notification goes nowhere.
+    const email = `chat-sdk-contract-${Date.now()}@example.com`;
+    const signer = await client.signers.create(env!.accountId, { full_name: "Chat SDK Contract", email });
+    cleanup.push(() => client.signers.remove(env!.accountId, signer.id));
+    const doc = await client.documents.upload(env!.accountId, {
+      filename: `cs-contract-${Date.now()}.pdf`,
+      body: makeMinimalPdf(),
+    });
+    cleanup.push(() => client.documents.remove(doc.id));
+    await waitForDocument(doc.id, (document) => document.status === "metadata_ready");
+
+    const estimate = await client.assignments.estimateCost(doc.id, { method: "virtual", signers: [{}] });
+    expect(typeof estimate.has_sufficient_resources).toBe("boolean");
+    expect(Array.isArray(estimate.breakdown)).toBe(true);
+
+    const assignment = await client.assignments.create(doc.id, {
+      method: "virtual",
+      signers: [{ id: signer.id }],
+    });
+
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const extended = await client.assignments.resetExpiration(doc.id, assignment.id, expiresAt);
+    expect(extended.expires_at).toBeTruthy();
+    const cleared = await client.assignments.resetExpiration(doc.id, assignment.id, null);
+    expect(cleared.expires_at).toBeNull();
+
+    const token = await publicClient.documents.sendPublicToken(doc.id, { channel: "email", recipient: email });
+    expect(token).toMatchObject({ channel: "email", recipient: email, document: { id: doc.id } });
+
+    const listed = await client.signature.listDocumentsAsWorkspace(signer.id, { perPage: 1 });
+    expect(listed.data.map((document) => document.id)).toContain(doc.id);
+    const searched = await client.signature.searchDocumentsAsWorkspace(signer.id, doc.name);
+    expect(Array.isArray(searched.data)).toBe(true);
+    await expect(client.signature.listDocuments(signer.id, " ")).rejects.toBeInstanceOf(ConfigurationError);
+
+    expect(Array.isArray(await client.assignments.whatsappNotifications(doc.id, assignment.id))).toBe(true);
+    await expect(client.assignments.estimateResendCost(doc.id, assignment.id, signer.id)).resolves.toBeTruthy();
+
+    await client.documents.remove(doc.id);
+    await client.signers.remove(env!.accountId, signer.id);
   }, 60_000);
 
   /** Find an existing signer by email or create one. */

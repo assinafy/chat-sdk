@@ -28,6 +28,7 @@ import type {
   VerifyMfaInput,
 } from "./types.js";
 
+/** Login, two-factor, password and API-key operations (`client.auth`). */
 export class AuthResource {
   constructor(private readonly http: HttpClient) {}
 

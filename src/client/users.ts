@@ -9,6 +9,7 @@ import type {
   UpdateNotificationPreferences,
 } from "./types.js";
 
+/** The authenticated user's profile, statistics and notification preferences (`client.users`). */
 export class UsersResource {
   constructor(private readonly http: HttpClient) {}
 

@@ -156,6 +156,49 @@ describe("HttpClient", () => {
     }
   });
 
+  it("surfaces X-Rate-Limit-* and Retry-After on a 429 error", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      mkResponse(
+        { status: 429, message: "Too Many Requests", data: null },
+        {
+          status: 429,
+          headers: {
+            "x-rate-limit-limit": "60",
+            "x-rate-limit-remaining": "0",
+            "x-rate-limit-reset": "17",
+            "retry-after": "17",
+          },
+        },
+      ),
+    );
+    const http = new HttpClient({ baseUrl: "https://api", auth: { kind: "none" }, fetch: fetchImpl });
+
+    const error = await http.post("/x", {}).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({
+      status: 429,
+      rateLimit: { limit: 60, remaining: 0, resetSeconds: 17 },
+      retryAfterSeconds: 17,
+    });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it("reads an HTTP-date Retry-After as whole seconds and omits absent metadata", async () => {
+    const date = new Date(Date.now() + 5_500).toUTCString();
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(mkResponse("busy", { status: 429, headers: { "retry-after": date } }))
+      .mockResolvedValueOnce(mkResponse("bad", { status: 400, headers: { "retry-after": "soon" } }));
+    const http = new HttpClient({ baseUrl: "https://api", auth: { kind: "none" }, fetch: fetchImpl });
+
+    const limited = (await http.put("/x").catch((e: unknown) => e)) as ApiError;
+    expect(limited.retryAfterSeconds).toBeGreaterThanOrEqual(4);
+    expect(limited.retryAfterSeconds).toBeLessThanOrEqual(6);
+    expect(limited.rateLimit).toBeUndefined();
+    const bad = (await http.put("/x").catch((e: unknown) => e)) as ApiError;
+    expect(bad.retryAfterSeconds).toBeUndefined();
+  });
+
   it("aborts immediately while waiting to retry", async () => {
     vi.useFakeTimers();
     try {
