@@ -15,6 +15,17 @@ export interface TestEnv {
 
 const SANDBOX_BASE_URL = "https://sandbox.assinafy.com.br/v1";
 
+/** Space live requests below the sandbox's 120/minute authenticated quota, including cleanup. */
+export function createSandboxFetch(): typeof fetch {
+  let nextRequestAt = 0;
+  return async (input, init) => {
+    const sendAt = Math.max(Date.now(), nextRequestAt);
+    nextRequestAt = sendAt + 650;
+    await new Promise((resolve) => setTimeout(resolve, Math.max(0, sendAt - Date.now())));
+    return fetch(input, init);
+  };
+}
+
 /** Returns env vars if all required ones are present, otherwise `undefined`. */
 export function loadEnv(): TestEnv | undefined {
   const baseUrl = (process.env.ASSINAFY_BASE_URL ?? SANDBOX_BASE_URL).replace(/\/$/, "");

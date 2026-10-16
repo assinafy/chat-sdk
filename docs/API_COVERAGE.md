@@ -1,6 +1,6 @@
 # Assinafy v1 API operation index
 
-This index lists the 106 Assinafy v1 operations, their SDK methods, request and
+This index lists the 112 Assinafy v1 operations, their SDK methods, request and
 response documentation, and authentication mode. Paths include the `/v1`
 prefix; SDK resource methods use a `baseUrl` that already contains it.
 
@@ -27,18 +27,18 @@ Authentication labels:
 | API group | Operations |
 | --- | ---: |
 | Accounts | 10 |
-| Assignments | 7 |
+| Assignments | 10 |
 | Authentication | 15 |
 | Documents | 18 |
 | Fields | 8 |
 | OAuth | 4 |
 | Signers | 5 |
-| Signing | 17 |
+| Signing | 19 |
 | Tags | 4 |
 | Templates | 1 |
 | Users | 4 |
-| Webhooks | 13 |
-| **Total** | **106** |
+| Webhooks | 14 |
+| **Total** | **112** |
 
 ## Operations
 
@@ -68,6 +68,9 @@ Authentication labels:
 | POST | `/v1/documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/estimate-resend-cost` | `client.assignments.estimateResendCost` | [Request](API_REFERENCE.md#assignments-estimate-resend-cost) | [Unwrapped response](API_REFERENCE.md#assignments-estimate-resend-cost) | Bearer / API key |
 | PUT | `/v1/documents/{documentId}/assignments/{assignmentId}/reset-expiration` | `client.assignments.resetExpiration` | [Request](API_REFERENCE.md#assignments-reset-expiration) | [Unwrapped response](API_REFERENCE.md#assignments-reset-expiration) | Bearer / API key |
 | GET | `/v1/documents/{documentId}/assignments/{assignmentId}/whatsapp-notifications` | `client.assignments.whatsappNotifications` | [Request](API_REFERENCE.md#assignments-whatsapp-notifications) | [Unwrapped response](API_REFERENCE.md#assignments-whatsapp-notifications) | Bearer / API key |
+| GET | `/v1/documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/identity-verification` | `client.assignments.getSignerIdentityReview` | [Request](API_REFERENCE.md#assignments-get-signer-identity-review) | [Unwrapped response](API_REFERENCE.md#assignments-get-signer-identity-review) | Bearer / API key |
+| GET | `/v1/documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/identity-verification/images/{name}` | `client.assignments.downloadSignerIdentityReviewImage` | [Request](API_REFERENCE.md#assignments-download-signer-identity-review-image) | [Raw response](API_REFERENCE.md#assignments-download-signer-identity-review-image) | Bearer / API key |
+| POST | `/v1/documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/identity-verification/review` | `client.assignments.reviewSignerIdentity` | [Request](API_REFERENCE.md#assignments-review-signer-identity) | [Unwrapped response](API_REFERENCE.md#assignments-review-signer-identity) | Bearer / API key |
 
 ### Authentication
 
@@ -172,6 +175,8 @@ it at the host root. The SDK derives that origin from the configured `baseUrl`.
 | GET | `/v1/signers/{signerId}/documents` | `client.signature.listDocuments` (signer code), `client.signature.listDocumentsAsWorkspace` (workspace) | [Request](API_REFERENCE.md#signature-list-documents) | [Unwrapped response](API_REFERENCE.md#signature-list-documents) | Signer access code, or Bearer / API key |
 | GET | `/v1/signers/{signerId}/documents/search` | `client.signature.searchDocuments` (signer code), `client.signature.searchDocumentsAsWorkspace` (workspace) | [Request](API_REFERENCE.md#signature-search-documents) | [Unwrapped response](API_REFERENCE.md#signature-search-documents) | Signer access code, or Bearer / API key |
 | GET | `/v1/signers/{signerId}/documents/{documentId}/download/{artifactName}` | `client.signature.downloadDocument` | [Request](API_REFERENCE.md#signature-download-document) | [Raw response](API_REFERENCE.md#signature-download-document) | Public |
+| GET | `/v1/signers/identity-verification` | `client.signature.getIdentityVerification` | [Request](API_REFERENCE.md#signature-get-identity-verification) | [Unwrapped response](API_REFERENCE.md#signature-get-identity-verification) | Signer access code |
+| POST | `/v1/signers/identity-verification` | `client.signature.startIdentityVerification` | [Request](API_REFERENCE.md#signature-start-identity-verification) | [Unwrapped response](API_REFERENCE.md#signature-start-identity-verification) | Signer access code |
 
 ### Tags
 
@@ -214,6 +219,7 @@ it at the host root. The SDK derives that origin from the configured `baseUrl`.
 | GET | `/v1/webhooks/event-types` | `client.webhooks.listEventTypes` | [Request](API_REFERENCE.md#webhooks-list-event-types) | [Unwrapped response](API_REFERENCE.md#webhooks-list-event-types) | Bearer / API key |
 | GET | `/v1/accounts/{accountId}/webhooks` | `client.webhooks.listDispatches` | [Request](API_REFERENCE.md#webhooks-list-dispatches) | [Unwrapped response](API_REFERENCE.md#webhooks-list-dispatches) | Bearer / API key |
 | POST | `/v1/accounts/{accountId}/webhooks/{historyId}/retry` | `client.webhooks.retryDispatch` | [Request](API_REFERENCE.md#webhooks-retry-dispatch) | [Unwrapped response](API_REFERENCE.md#webhooks-retry-dispatch) | Bearer / API key |
+| DELETE | `/v1/accounts/{accountId}/webhooks/endpoints` | `client.webhooks.deleteEndpointByUrl` | [Request](API_REFERENCE.md#webhooks-delete-endpoint-by-url) | [Unwrapped response](API_REFERENCE.md#webhooks-delete-endpoint-by-url) | Bearer / API key |
 
 ## Operation outside the published OpenAPI document
 

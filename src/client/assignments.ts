@@ -11,14 +11,18 @@ import { pageQuery } from "./internal.js";
 import { SignatureResource } from "./signature.js";
 import type {
   Assignment,
+  AssignmentSignerInput,
   CostEstimate,
   CreateAssignmentInput,
   EstimateAssignmentCostInput,
   EstimateAssignmentSignerInput,
   ListAssignmentsQuery,
+  IdentityReviewImage,
   Page,
   ResendNotificationResult,
+  ReviewSignerIdentityInput,
   SignFieldEntry,
+  SignerIdentityReview,
   WhatsAppNotification,
 } from "./types.js";
 
@@ -35,6 +39,8 @@ const paths = {
     `/documents/${encodeURIComponent(documentId)}/assignments/${encodeURIComponent(assignmentId)}/reset-expiration`,
   whatsappNotifications: (documentId: string, assignmentId: string) =>
     `/documents/${encodeURIComponent(documentId)}/assignments/${encodeURIComponent(assignmentId)}/whatsapp-notifications`,
+  identityVerification: (documentId: string, assignmentId: string, signerId: string) =>
+    `/documents/${encodeURIComponent(documentId)}/assignments/${encodeURIComponent(assignmentId)}/signers/${encodeURIComponent(signerId)}/identity-verification`,
 };
 
 /** Signature requests: create, price, resend, re-expire and inspect assignments (workspace credentials). */
@@ -61,7 +67,7 @@ export class AssignmentsResource {
    * `POST /documents/{documentId}/assignments` — request signatures.
    *
    * Request: `{ method: "virtual" | "collect", signers: [{ id,
-   * verification_method?: "Email" | "Whatsapp" | "DigitalCertificate",
+   * verification_method?: "Email" | "Whatsapp" | "DigitalCertificate" | "IdDocumentFaceMatchBasic",
    * notification_methods?: ("Email" | "Whatsapp")[], step? }], entries?,
    * message?, expires_at?, copy_receivers? }`. `entries` (page placements) is
    * required for `collect`. The `signerIds`/`signer_ids` aliases are
@@ -180,6 +186,52 @@ export class AssignmentsResource {
   whatsappNotifications(documentId: string, assignmentId: string): Promise<WhatsAppNotification[]> {
     return this.http.get<WhatsAppNotification[]>(paths.whatsappNotifications(documentId, assignmentId));
   }
+
+  /**
+   * `GET /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/identity-verification`
+   * — the account's {@link SignerIdentityReview}, including evidence summaries
+   * and available image names. Uses workspace credentials, never a signer code.
+   */
+  getSignerIdentityReview(documentId: string, assignmentId: string, signerId: string): Promise<SignerIdentityReview> {
+    return this.http.get<SignerIdentityReview>(paths.identityVerification(documentId, assignmentId, signerId));
+  }
+
+  /**
+   * `GET .../identity-verification/images/{name}` — raw JPEG, PNG or PDF
+   * `Response`, sent with `Cache-Control: no-store`. Choose a name from the
+   * review's `images`. Available only during `InReview`; after a decision,
+   * the API returns `404`. Do not persist biometric evidence.
+   */
+  downloadSignerIdentityReviewImage(
+    documentId: string, assignmentId: string, signerId: string, name: IdentityReviewImage,
+  ): Promise<Response> {
+    return this.http.rawRequest(
+      `${paths.identityVerification(documentId, assignmentId, signerId)}/images/${encodeURIComponent(name)}`,
+    );
+  }
+
+  /**
+   * `POST .../identity-verification/review` — `{ decision: "Approved" |
+   * "Rejected", note?: string | null }`; returns {@link SignerIdentityReview}.
+   * Requires `InReview` and a document awaiting signatures or identity review.
+   * Approval releases certification after every signer finishes and all reviews
+   * pass. Rejection cancels the document and notifies signers/copy receivers.
+   * The optional note (at most 2,000 characters) is never shown to signers.
+   */
+  async reviewSignerIdentity(
+    documentId: string, assignmentId: string, signerId: string, input: ReviewSignerIdentityInput,
+  ): Promise<SignerIdentityReview> {
+    const { decision, note } = input;
+    if (decision !== "Approved" && decision !== "Rejected") {
+      throw new ConfigurationError('Identity review decision must be "Approved" or "Rejected"');
+    }
+    if (note !== undefined && note !== null && (typeof note !== "string" || [...note].length > 2000)) {
+      throw new ConfigurationError("Identity review note must be null or a string of at most 2,000 characters");
+    }
+    return this.http.post<SignerIdentityReview>(
+      `${paths.identityVerification(documentId, assignmentId, signerId)}/review`, { decision, note },
+    );
+  }
 }
 
 /**
@@ -190,8 +242,8 @@ export class AssignmentsResource {
 function normalizeAssignmentInput(
   input: CreateAssignmentInput | EstimateAssignmentCostInput,
 ): Record<string, unknown> & { signers?: EstimateAssignmentSignerInput[] } {
-  const { signerIds, signer_ids, signers, ...rawRest } = input;
-  const { expiration, ...rest } = rawRest as typeof rawRest & { expiration?: string };
+  const { signerIds, signer_ids, signers, method, entries } = input;
+  const { expiration, expires_at, message, copy_receivers } = input as CreateAssignmentInput;
   const ids = [...(signer_ids ?? []), ...(signerIds ?? [])];
   const explicit = signers ?? [];
   const seen = new Set(explicit.map((s) => s.id).filter(Boolean));
@@ -200,11 +252,16 @@ function normalizeAssignmentInput(
     seen.add(id);
     return [{ id }];
   });
-  const merged = [...explicit, ...fromIds];
-  const expiresAt = "expires_at" in rest ? rest.expires_at : undefined;
+  const merged = [...explicit, ...fromIds].map((signer) => {
+    const { id, step, verification_method, notification_methods } = signer as AssignmentSignerInput;
+    return { id, step, verification_method, notification_methods };
+  });
   return {
-    ...rest,
-    ...(expiration !== undefined && expiresAt === undefined ? { expires_at: expiration } : {}),
+    method,
+    entries,
+    message,
+    copy_receivers,
+    expires_at: expires_at === undefined ? expiration : expires_at,
     ...(merged.length > 0 ? { signers: merged } : {}),
   };
 }

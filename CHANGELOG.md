@@ -5,6 +5,36 @@ All notable changes to `@assinafy/chat-sdk` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0] - 2026-10-16
+
+### Added
+
+- Biometric verification with `IdDocumentFaceMatchBasic`: signer session status,
+  explicit consent and hosted capture, workspace identity evidence and images,
+  and approval/rejection decisions.
+- `webhooks.deleteEndpointByUrl(accountId, url)` deletes an endpoint by its exact
+  registered URL.
+- AI signer creation accepts `government_id`; assignment and template tools
+  accept biometric verification and the `pending_identity_review` status.
+
+### Changed
+
+- Assignment creation and template estimates send only declared request fields.
+- Field and template preparation errors reject through promises.
+- Development and CI use Node.js 24.22.0 LTS.
+
+### Fixed
+
+- Adapter shutdown continues after synchronous teardown failures.
+
+### Security
+
+- Standard Webhooks verification rejects malformed base64 keys and signatures.
+- Thread key/value storage is scoped to the adapter and thread together;
+  duplicate adapter names are rejected.
+  Persistent backends must migrate thread IDs to `JSON.stringify([adapterName,
+  threadId])` for values accessed through `Thread`; subscription IDs are unchanged.
+
 ## [2.4.1] - 2026-10-11
 
 ### Added

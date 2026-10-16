@@ -151,10 +151,21 @@ describe("verifyStandardWebhook", () => {
       { secret: "", id, timestamp, body, signature },
       { secret: "whsec_", id, timestamp, body, signature },
       { secret, id, timestamp, body, signature: "v1," },
+      { secret, id, timestamp, body, signature: undefined as never },
+      { secret, id, timestamp, body, signature: `${signature}!!` },
+      { secret, id, timestamp, body, signature: `${signature},junk` },
+      { secret: `${secret}!!`, id, timestamp, body, signature },
       { secret, id, timestamp, body, signature, toleranceSeconds: -1 },
     ];
     for (const options of cases) {
       expect(() => verifyStandardWebhook(options)).toThrow(WebhookSignatureError);
     }
+  });
+
+  it("skips a malformed signature entry when another v1 entry matches", () => {
+    const timestamp = now();
+    expect(verifyStandardWebhook({
+      secret, id, timestamp, body, signature: `v1,!! ${sign(timestamp)}`,
+    })).toBe(true);
   });
 });

@@ -7,21 +7,26 @@
  * credentials.
  */
 import { afterAll, describe, it, expect } from "vitest";
+import { createHmac } from "node:crypto";
+import { verifyStandardWebhook } from "../../src/adapters/webhook.js";
 import { ApiError, AssinafyClient, ConfigurationError } from "../../src/client/index.js";
-import { loadEnv, makeMinimalPdf } from "../setup.js";
+import { createSandboxFetch, loadEnv, makeMinimalPdf } from "../setup.js";
 
 const env = loadEnv();
 const describeLive = env ? describe : describe.skip;
 const itWithNotifications = env?.notificationsEnabled ? it : it.skip;
 
 describeLive("Assinafy API — live sandbox", () => {
+  const sandboxFetch = createSandboxFetch();
   const client = new AssinafyClient({
-    apiKey: env!.apiKey,
-    baseUrl: env!.baseUrl,
-    accountId: env!.accountId,
+    apiKey: env?.apiKey,
+    baseUrl: env?.baseUrl,
+    accountId: env?.accountId,
+    fetch: sandboxFetch,
   });
   const publicClient = new AssinafyClient({
-    baseUrl: env!.baseUrl,
+    baseUrl: env?.baseUrl,
+    fetch: sandboxFetch,
   });
 
   // Track resources we create so we can clean up at the end.
@@ -365,9 +370,38 @@ describeLive("Assinafy API — live sandbox", () => {
     expect(subscription.is_active).toBe(true);
     expect((await client.webhooks.inactivate(account.id)).is_active).toBe(false);
 
-    await expectAvailableOrSandbox404(() => client.accounts.getStats(account.id), (rows) => {
-      expect(Array.isArray(rows)).toBe(true);
+    const endpoints = await client.webhooks.listEndpoints(account.id);
+    expect(endpoints).toHaveLength(1);
+    const endpoint = endpoints[0]!;
+    expect((await client.webhooks.getEndpoint(account.id, endpoint.id)).id).toBe(endpoint.id);
+    await client.webhooks.updateEndpoint(account.id, endpoint.id, { signing_enabled: true });
+    const firstSecret = await client.webhooks.getEndpointSecret(account.id, endpoint.id);
+    const rotated = await client.webhooks.rotateEndpointSecret(account.id, endpoint.id);
+    // Compare without putting secret values in assertion output.
+    expect(rotated.secret !== firstSecret.secret).toBe(true);
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const body = '{"event":"document_ready"}';
+    const signature = createHmac("sha256", Buffer.from(rotated.secret.replace(/^whsec_/, ""), "base64"))
+      .update(`test-event.${timestamp}.${body}`).digest("base64");
+    expect(verifyStandardWebhook({ secret: rotated.secret, id: "test-event", timestamp, body, signature: `v1,${signature}` })).toBe(true);
+    try {
+      await client.webhooks.deleteEndpointByUrl(account.id, endpoint.url);
+    } catch (error) {
+      // Sandbox URL deletion returns 404 even for an endpoint just retrieved by ID.
+      expect(error).toBeInstanceOf(ApiError);
+      expect((error as ApiError).status).toBe(404);
+      expect((await client.webhooks.getEndpoint(account.id, endpoint.id)).id).toBe(endpoint.id);
+      await client.webhooks.deleteEndpoint(account.id, endpoint.id);
+    }
+    expect(await client.webhooks.listEndpoints(account.id)).toEqual([]);
+    const replacement = await client.webhooks.createEndpoint(account.id, {
+      url: "https://example.test/webhooks/assinafy", email: "webhooks@example.test",
+      events: ["document_ready"], is_active: false,
     });
+    await client.webhooks.deleteEndpoint(account.id, replacement.id);
+    expect(await client.webhooks.listEndpoints(account.id)).toEqual([]);
+
+    expect(Array.isArray(await client.accounts.getStats(account.id))).toBe(true);
 
     await client.accounts.remove(account.id, { force: true });
     await expect(client.accounts.get(account.id)).rejects.toMatchObject({ status: 404 });
@@ -377,26 +411,16 @@ describeLive("Assinafy API — live sandbox", () => {
     const user = await client.users.getCurrent();
     expect(user.id).toBeTruthy();
     expect(user.email).toContain("@");
+    expect(Array.isArray((await client.auth.listMfaMethods()).methods)).toBe(true);
 
     const apiKey = await client.auth.getApiKey();
     expect(apiKey === null || apiKey.api_key === null || typeof apiKey.api_key === "string").toBe(true);
 
-    await expectAvailableOrSandbox404(() => client.users.getStats(), (rows) => {
-      expect(Array.isArray(rows)).toBe(true);
-    });
-    await expectAvailableOrSandbox404(() => client.accounts.getStats(env!.accountId), (rows) => {
-      expect(Array.isArray(rows)).toBe(true);
-    });
-
-    await expectAvailableOrSandbox404(
-      async () => {
-        const preferences = await client.users.getNotificationPreferences();
-        return client.users.updateNotificationPreferences({
-          DocumentCompleted: preferences.DocumentCompleted,
-        });
-      },
-      (preferences) => expect(typeof preferences.DocumentCompleted).toBe("boolean"),
-    );
+    expect(Array.isArray(await client.users.getStats())).toBe(true);
+    expect(Array.isArray(await client.accounts.getStats(env!.accountId))).toBe(true);
+    const preferences = await client.users.getNotificationPreferences();
+    const updated = await client.users.updateNotificationPreferences({ DocumentCompleted: preferences.DocumentCompleted });
+    expect(typeof updated.DocumentCompleted).toBe("boolean");
   });
 
   it("assignments.list either returns the documented page or the known sandbox context error", async () => {
@@ -526,6 +550,23 @@ describeLive("Assinafy API — live sandbox", () => {
     expect(typeof estimate.has_sufficient_resources).toBe("boolean");
     expect(Array.isArray(estimate.breakdown)).toBe(true);
 
+    for (const verification_method of ["Whatsapp", "DigitalCertificate", "IdDocumentFaceMatchBasic"]) {
+      try {
+        const cost = await client.assignments.estimateCost(doc.id, { method: "virtual", signers: [{ verification_method }] });
+        expect(typeof cost.has_sufficient_resources).toBe("boolean");
+      } catch (error) {
+        expect(error).toBeInstanceOf(ApiError);
+        if (verification_method === "IdDocumentFaceMatchBasic") {
+          // The sandbox has not deployed biometric verification yet.
+          expect((error as ApiError).status).toBe(400);
+          expect((error as ApiError).message).toBe("Método de verificação inválido.");
+        } else {
+          expect((error as ApiError).status).toBe(403);
+          expect((error as ApiError).message).toMatch(/plano|disponível/i);
+        }
+      }
+    }
+
     const assignment = await client.assignments.create(doc.id, {
       method: "virtual",
       signers: [{ id: signer.id }],
@@ -576,18 +617,6 @@ describeLive("Assinafy API — live sandbox", () => {
     }
     expect(predicate(last)).toBe(true);
     return last;
-  }
-
-  async function expectAvailableOrSandbox404<T>(
-    request: () => Promise<T>,
-    assertion: (value: T) => void,
-  ): Promise<void> {
-    try {
-      assertion(await request());
-    } catch (error) {
-      expect(error).toBeInstanceOf(ApiError);
-      expect((error as ApiError).status).toBe(404);
-    }
   }
 
   function extractAccessCode(url: string | undefined): string | undefined {

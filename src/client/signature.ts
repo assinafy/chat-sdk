@@ -12,14 +12,18 @@
  */
 
 import { withQuery, type HttpClient } from "./http.js";
+import { ConfigurationError } from "./errors.js";
 import { pageQuery, signerTransport, toBlobPart, withAccessCode } from "./internal.js";
 import type {
   Document,
   DocumentArtifactName,
+  IdentityVerification,
+  IdentityVerificationSession,
   ListSignerDocumentsQuery,
   Page,
   SignFieldEntry,
   SignerSelf,
+  StartIdentityVerificationInput,
 } from "./types.js";
 
 /** Signature image kind: `signature` or `initial`. */
@@ -27,6 +31,7 @@ export type SignatureType = "signature" | "initial" | (string & {});
 
 const paths = {
   self: () => `/signers/self`,
+  identityVerification: () => `/signers/identity-verification`,
   acceptTerms: () => `/signers/accept-terms`,
   verify: () => `/verify`,
   upload: () => `/signature`,
@@ -60,10 +65,39 @@ export class SignatureResource {
    *
    * Response: `{ resource, id, full_name, email, whatsapp_phone_number,
    * government_id, has_accepted_terms, has_signature, has_initial,
-   * is_signature_reusable }`.
+   * is_signature_reusable, verification_method }`.
    */
   async self(accessCode: string): Promise<SignerSelf> {
     return this.signer.get<SignerSelf>(withAccessCode(paths.self(), accessCode));
+  }
+
+  /**
+   * `GET /signers/identity-verification` — `{ can_start, status, url,
+   * expires_at, completed_at }`, using only the signer access code. Start a
+   * capture only when `can_start` is true. `InReview` permits signing but
+   * holds certification until the account approves the identity review.
+   */
+  async getIdentityVerification(accessCode: string): Promise<IdentityVerification> {
+    return this.signer.get<IdentityVerification>(withAccessCode(paths.identityVerification(), accessCode));
+  }
+
+  /**
+   * `POST /signers/identity-verification` — request `{ consent: true }`,
+   * supplied explicitly by the signer. Response: `{ id, url, expires_at }`.
+   * Open the bearer URL unchanged, including its fragment; never log it or
+   * persist it in browser storage. Only no session or an `Expired` session
+   * may start; `Declined`/`Abandoned` require a new document and assignment.
+   * The request is never retried, and restarting an expired capture is not billed again.
+   */
+  async startIdentityVerification(
+    accessCode: string,
+    input: StartIdentityVerificationInput,
+  ): Promise<IdentityVerificationSession> {
+    const path = withAccessCode(paths.identityVerification(), accessCode);
+    if (input?.consent !== true) {
+      throw new ConfigurationError("Identity verification requires the signer's explicit biometric consent");
+    }
+    return this.signer.post<IdentityVerificationSession>(path, { consent: input.consent });
   }
 
   /** `PUT /signers/accept-terms` — accept the signer terms of use. No body; resolves on success. */

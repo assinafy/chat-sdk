@@ -179,6 +179,26 @@ describe("Chat", () => {
     expect(adapter.lastSent?.fallbackText).toBe("Order confirmed");
   });
 
+  it("isolates key-value data when adapters share a thread id", async () => {
+    const first = createMemoryAdapter({ name: "first" });
+    const second = createMemoryAdapter({ name: "second" });
+    const c = new Chat({ userName: "bot", adapters: { first, second } });
+    const a = c.thread("first", "shared");
+    const b = c.thread("second", "shared");
+    await a.set("document", "first-document");
+    await expect(b.get("document")).resolves.toBeUndefined();
+    await b.set("document", "second-document");
+    await a.delete("document");
+    await expect(b.get("document")).resolves.toBe("second-document");
+    await expect(a.get("document")).resolves.toBeUndefined();
+  });
+
+  it("rejects duplicate adapter identities before initialization", () => {
+    expect(() => new Chat({ userName: "bot", adapters: {
+      first: createMemoryAdapter(), second: createMemoryAdapter(),
+    } })).toThrow("unique names");
+  });
+
   it("processAction fires onAction handlers", async () => {
     const seen: string[] = [];
     chat.onAction(async (_, action) => {
@@ -209,6 +229,19 @@ describe("Chat", () => {
       state: new MemoryStateAdapter(),
     });
     await c.disconnect();
+    expect(disconnected).toBe(true);
+  });
+
+  it("disconnects the remaining adapters after a synchronous teardown failure", async () => {
+    const first = createMemoryAdapter({ name: "first" });
+    const second = createMemoryAdapter({ name: "second" });
+    const failure = new Error("teardown failed");
+    Object.assign(first, { disconnect: () => { throw failure; } });
+    let disconnected = false;
+    Object.assign(second, { disconnect: () => { disconnected = true; } });
+    const c = new Chat({ userName: "bot", adapters: { first, second } });
+
+    await expect(c.disconnect()).rejects.toBe(failure);
     expect(disconnected).toBe(true);
   });
 });

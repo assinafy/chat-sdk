@@ -3,7 +3,7 @@
 This is the reference for the public surface of `@assinafy/chat-sdk`.
 The REST contracts follow the official OpenAPI document at
 [`https://api.assinafy.com.br/v1/docs/openapi.json`](https://api.assinafy.com.br/v1/docs/openapi.json)
-and the complete 106-operation REST inventory is in the
+and the complete 112-operation REST inventory is in the
 [API operation index](./API_COVERAGE.md).
 
 The client exposes the API operations plus pagination helpers, deprecated
@@ -336,6 +336,9 @@ Document-tag operations take tag **IDs**, not tag names.
 | <a id="assignments-sign"></a>`assignments.sign(documentId, assignmentId, accessCode, entries)` | alias of `signature.sign()` | signer code | [`SignFieldEntry[]`](#sign-assignment-request) | [`void`](#unwrapped-json-pagination-raw-responses-and-void) |
 | <a id="assignments-decline"></a>`assignments.decline(documentId, assignmentId, accessCode, declineReason)` | alias of `signature.decline()` | signer code | [`{ decline_reason }`](#decline-request) | [`void`](#unwrapped-json-pagination-raw-responses-and-void) |
 | <a id="assignments-whatsapp-notifications"></a>`assignments.whatsappNotifications(documentId, assignmentId)` | `GET /documents/{documentId}/assignments/{assignmentId}/whatsapp-notifications` | account | path/query only | [`WhatsAppNotification[]`](#whatsapp-notification-response) |
+| <a id="assignments-get-signer-identity-review"></a>`assignments.getSignerIdentityReview(documentId, assignmentId, signerId)` | `GET /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/identity-verification` | account | path/query only | [`SignerIdentityReview`](#signer-identity-review-response) |
+| <a id="assignments-download-signer-identity-review-image"></a>`assignments.downloadSignerIdentityReviewImage(documentId, assignmentId, signerId, name)` | `GET /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/identity-verification/images/{name}` | account | [`IdentityReviewImage`](#identity-review-image-request) | [`Response`](#identity-review-image-request) |
+| <a id="assignments-review-signer-identity"></a>`assignments.reviewSignerIdentity(documentId, assignmentId, signerId, input)` | `POST /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/identity-verification/review` | account | [`ReviewSignerIdentityInput`](#identity-review-decision-request) | [`SignerIdentityReview`](#signer-identity-review-response) |
 
 ### Fields
 
@@ -364,6 +367,8 @@ methods.
 | SDK method | HTTP operation | Auth | Request | Unwrapped SDK response |
 | --- | --- | --- | --- | --- |
 | <a id="signature-self"></a>`signature.self(accessCode)` | `GET /signers/self` | signer code | path/query only | [`SignerSelf`](#signer-self-response) |
+| <a id="signature-get-identity-verification"></a>`signature.getIdentityVerification(accessCode)` | `GET /signers/identity-verification` | signer code | path/query only | [`IdentityVerification`](#identity-verification-response) |
+| <a id="signature-start-identity-verification"></a>`signature.startIdentityVerification(accessCode, input)` | `POST /signers/identity-verification` | signer code | [`StartIdentityVerificationInput`](#start-identity-verification-request) | [`IdentityVerificationSession`](#identity-verification-session-response) |
 | <a id="signature-accept-terms"></a>`signature.acceptTerms(accessCode)` | `PUT /signers/accept-terms` | signer code | path/query only | [`void`](#unwrapped-json-pagination-raw-responses-and-void) |
 | <a id="signature-verify"></a>`signature.verify(accessCode, verificationCode)` | `POST /verify` | signer code | [`verification-code`](#verify-otp-request) | [`void`](#unwrapped-json-pagination-raw-responses-and-void) |
 | <a id="signature-upload"></a>`signature.upload(accessCode, image, contentType?, reuse?)` or `signature.upload(accessCode, type, image, contentType?, reuse?)` | `POST /signature` | signer code | [raw image + query](#signature-upload-request) | [`void`](#unwrapped-json-pagination-raw-responses-and-void) |
@@ -395,8 +400,14 @@ methods.
 | <a id="webhooks-get-endpoint"></a>`webhooks.getEndpoint(accountId, endpointId)` | `GET /accounts/{accountId}/webhooks/endpoints/{endpointId}` | account | path/query only | [`WebhookEndpoint`](#webhook-endpoint-response) |
 | <a id="webhooks-update-endpoint"></a>`webhooks.updateEndpoint(accountId, endpointId, input)` | `PUT /accounts/{accountId}/webhooks/endpoints/{endpointId}` | account | [`UpdateWebhookEndpointInput`](#webhook-endpoint-request) | [`WebhookEndpoint`](#webhook-endpoint-response) |
 | <a id="webhooks-delete-endpoint"></a>`webhooks.deleteEndpoint(accountId, endpointId)` | `DELETE /accounts/{accountId}/webhooks/endpoints/{endpointId}` | account | path/query only | [`void`](#unwrapped-json-pagination-raw-responses-and-void) |
+| <a id="webhooks-delete-endpoint-by-url"></a>`webhooks.deleteEndpointByUrl(accountId, url)` | `DELETE /accounts/{accountId}/webhooks/endpoints` | account | [`url`](#delete-webhook-endpoint-by-url-request) | [`void`](#unwrapped-json-pagination-raw-responses-and-void) |
 | <a id="webhooks-get-endpoint-secret"></a>`webhooks.getEndpointSecret(accountId, endpointId)` | `GET /accounts/{accountId}/webhooks/endpoints/{endpointId}/secret` | account, not OAuth | path/query only | [`WebhookEndpointSecret`](#webhook-endpoint-secret-response) |
 | <a id="webhooks-rotate-endpoint-secret"></a>`webhooks.rotateEndpointSecret(accountId, endpointId)` | `POST /accounts/{accountId}/webhooks/endpoints/{endpointId}/secret/rotate` | account, not OAuth | path/query only | [`WebhookEndpointSecret`](#webhook-endpoint-secret-response) |
+
+The sandbox returns `404` for deletion by URL, even for an existing endpoint;
+use `deleteEndpoint` by ID there. The identity-verification routes are currently
+production-only; sandbox requests return `404`, and biometric cost estimates
+return `400` (invalid verification method).
 
 An account has 1 webhook endpoint, or up to 3 on paid plans; creating one past
 the limit answers `403`, and two endpoints of one account cannot share a `url`
@@ -1132,7 +1143,7 @@ When supplied, `sort` is encoded as a query parameter under the API's
 
 Only `full_name` is required. `whatsapp_phone_number` is needed for WhatsApp
 verification or notification and `government_id` (CPF/CNPJ) for
-`DigitalCertificate` signers. Provide at least one reachable
+`DigitalCertificate` signers, or a valid CPF for `IdDocumentFaceMatchBasic`. Provide at least one reachable
 notification destination before assigning the signer.
 
 #### Update signer request
@@ -1807,17 +1818,17 @@ directly is an SDK shorthand; the wire body is always the object above.
 ```json
 {
   "documents": 1,
-  "credits": 2,
+  "credits": 0.5,
   "needs_extra_document": false,
   "extra_document_cost": 0,
-  "total_credits": 2,
+  "total_credits": 0.5,
   "breakdown": [
     {
       "code": "SignatureDigitalCertificate",
       "name": "Digital certificate signature",
-      "cost": 2,
+      "cost": 0.5,
       "quantity": 1,
-      "unit_cost": 2
+      "unit_cost": 0.5
     }
   ],
   "document_balance": 90,
@@ -1825,13 +1836,13 @@ directly is an SDK shorthand; the wire body is always the object above.
   "has_sufficient_resources": true,
   "blocking_reason": null,
   "message": null,
-  "total": 2,
+  "total": 0.5,
   "currency": "BRL"
 }
 ```
 
 This example prices one digital-certificate signer with email notification: the
-signature costs 2 credits and the notification is free. WhatsApp notification
+signature costs 0.5 credit and the notification is free. WhatsApp notification
 adds 0.45 credit. Read the returned breakdown for the selected methods and plan.
 
 The shared `CostEstimate` response type covers assignment, resend, and template
@@ -2090,6 +2101,138 @@ Decline:
 ]
 ```
 
+### Identity verification payloads
+
+`IdDocumentFaceMatchBasic` requires the account's identity-verification feature
+and a signer with a valid CPF in `government_id`. It accepts exactly one
+notification channel, `Email` or `Whatsapp`; use cost estimation for the current
+per-signer fee plus notification. Both assignment and template methods accept
+this verification method.
+
+Read `signature.self(accessCode).verification_method` before choosing between
+OTP, hosted identity capture and the certificate browser flow. For hosted
+capture, obtain the signer's explicit biometric-processing consent before
+starting a session. Workspace credentials are never attached to signer requests.
+
+#### Identity verification response
+
+`signature.getIdentityVerification(accessCode)` has no request body and returns:
+
+```json
+{
+  "can_start": false,
+  "status": "Pending",
+  "url": "https://example.test/capture/session#t=placeholder",
+  "expires_at": "2026-10-17T21:18:47Z",
+  "completed_at": null
+}
+```
+
+`status` is nullable before a session exists. States are `Pending`, `InReview`,
+`Approved`, `Declined`, `Expired` and `Abandoned`. The URL is nullable and is
+available only during `Pending`; expiry and completion timestamps are nullable.
+The capture URL is a bearer credential: open it unchanged, including the
+fragment, and keep it out of logs and browser storage.
+
+#### Start identity verification request
+
+`signature.startIdentityVerification(accessCode, input)` sends only:
+
+```json
+{
+  "consent": true
+}
+```
+
+Missing or false consent rejects with `ConfigurationError` before any request.
+The application must obtain consent from the signer; never infer it. Start only
+when `can_start` is true: before the first session or after `Expired`. Restarting
+an expired capture does not charge again. A resend preserves a live session.
+`Declined` or `Abandoned` requires a new document and assignment. Session creation
+is never retried.
+
+#### Identity verification session response
+
+```json
+{
+  "id": "identity-session-1",
+  "url": "https://example.test/capture/session#t=placeholder",
+  "expires_at": "2026-10-17T21:18:47Z"
+}
+```
+
+`expires_at` may be null. When hosted capture completes, read the verification
+state again. `Approved` and `InReview` allow the signer to continue through
+`signContext`, data confirmation, terms acceptance and signing. `InReview`
+holds certification, so a fully signed document enters `pending_identity_review`.
+
+#### Signer identity review response
+
+`assignments.getSignerIdentityReview(documentId, assignmentId, signerId)` has no
+request body and uses workspace credentials. It and `reviewSignerIdentity`
+return this shape:
+
+```json
+{
+  "id": "identity-session-1",
+  "status": "InReview",
+  "provider": "AssinafyVerify",
+  "verification_method": "IdDocumentFaceMatchBasic",
+  "reason_codes": [{ "code": "NAME_MISMATCH", "description": "Name requires confirmation" }],
+  "evidence_available": true,
+  "expected": { "name": "Example Signer", "cpf": "52998224725" },
+  "document": { "type": "CNH", "name": "Example Signer", "cpf": "52998224725" },
+  "matches": { "cpf": true, "name": 0.52, "birth_date": null },
+  "checks": [{ "name": "name", "result": "review", "score": 0.52, "reasons": ["NAME_MISMATCH"] }],
+  "images": ["document_front", "document_back", "face"],
+  "ruleset_version": "2026-10-12.2",
+  "evidence_sha256": "9f2c0d6e4b1a8c3f5e7d9b0a2c4e6f8a1b3d5f7091e2c4a6b8d0f2e4a6c8e0b2",
+  "reviewed_by": null,
+  "reviewed_at": null,
+  "review_note": null,
+  "completed_at": null
+}
+```
+
+Evidence details may be omitted or null when unavailable. `matches.name` is
+similarity from 0 to 1; the other matches are nullable booleans. Unknown reason
+codes remain strings. A completed review records `reviewed_by: { id, name }`,
+`reviewed_at`, `review_note` and `completed_at`; `images` becomes empty. Provider
+approval without an account review has no evidence here: its summary is on the
+`signer_identity_verified` activity.
+
+#### Identity review image request
+
+Call `assignments.downloadSignerIdentityReviewImage(documentId, assignmentId,
+signerId, name)` with one of the names listed in `review.images`:
+`document_front`, `document_back`, `document_pdf` or `face`. No request body.
+The SDK returns the untouched binary `Response`: `image/jpeg`, `image/png` or
+`application/pdf`, with `Cache-Control: no-store`. Images are fetched from the
+provider and are available only during `InReview`; after a decision, every image
+returns `404`. Do not persist biometric evidence or expose it to an LLM tool.
+
+#### Identity review decision request
+
+`assignments.reviewSignerIdentity(documentId, assignmentId, signerId, input)`:
+
+```json
+{
+  "decision": "Approved",
+  "note": "Identity confirmed with supporting information."
+}
+```
+
+`decision` is required: `Approved` or `Rejected`. `note` is optional, nullable,
+and at most 2,000 characters. It is recorded in the activity log and sent to the
+provider, never shown to the signer. The response is `SignerIdentityReview` above.
+The verification must be `InReview` and the document must be `pending_signature`
+or `pending_identity_review`; otherwise the API returns `400`.
+
+Approval allows certification once every signer finishes and every outstanding
+review is approved. Rejection cancels the document (`rejected_by_user`) and
+notifies every signer and copy receiver. A review decision itself sends no
+separate message to the signer.
+
 ### Field payloads
 
 #### Field list query
@@ -2327,6 +2470,18 @@ discards the secret.
 ```
 
 `listEndpoints` returns an array of these, oldest first.
+
+#### Delete webhook endpoint by URL request
+
+```ts
+await client.webhooks.deleteEndpointByUrl(accountId, "https://example.test/webhooks/assinafy");
+```
+
+The exact registered URL is encoded in the `url` query parameter; there is no
+request body. Requires `webhooks:write` for OAuth. The endpoint is deleted and
+its slot freed; the SDK resolves with `undefined`. A missing/blank URL rejects
+before transport, and an unregistered URL receives `404`. Endpoint deletion by
+ID remains available through `deleteEndpoint`.
 
 #### Webhook endpoint secret response
 
@@ -2765,6 +2920,14 @@ A subscription row is `{ threadId, adapter?, subscribedAt: Date }`.
 `InMemoryState` is its deprecated alias. Use a durable shared implementation for
 multi-process production deployments.
 
+`Thread.get`, `set` and `delete` pass `JSON.stringify([adapter.name, thread.id])`
+as the backend's `threadId`, so equal IDs on different adapters have separate
+values. Subscriptions still use the original thread ID plus the adapter argument.
+When upgrading from 2.4.x with persisted thread values, migrate each old storage
+ID to that tuple for its owning adapter before using `Thread`; direct calls to
+`ChatState` keep the IDs supplied by the caller. Existing values are not deleted.
+Each adapter registered in a `Chat` must have a unique `name`.
+
 ## Card API
 
 All builders return plain JSON-serializable tagged objects. Capitalized names
@@ -2896,7 +3059,7 @@ methods.
 | Tool | Input object | Result |
 | --- | --- | --- |
 | `list_signers` | `{ accountId?, search?, page?, perPage? }` | [`Page<Signer>`](#signer-response) |
-| `create_signer` | `{ accountId?, full_name, email?, whatsapp_phone_number? }` | [`Signer`](#signer-response) |
+| `create_signer` | `{ accountId?, full_name, email?, whatsapp_phone_number?, government_id? }` | [`Signer`](#signer-response) |
 | `get_signer` | `{ accountId?, signerId }` | [`Signer`](#signer-response) |
 | `update_signer` | `{ accountId?, signerId, full_name?, email?, whatsapp_phone_number?, government_id? }` | [`Signer`](#signer-response) |
 | `delete_signer` | `{ accountId?, signerId }` | `{ "ok": true }` |

@@ -41,7 +41,7 @@ export class FieldsResource {
    * Request sent: `{ name, type, regex?, is_required? }`. Response:
    * {@link FieldDefinition}.
    */
-  create(accountId: string, input: CreateFieldInput): Promise<FieldDefinition> {
+  async create(accountId: string, input: CreateFieldInput): Promise<FieldDefinition> {
     const { name, type, regex, is_required } = input;
     return this.http.post<FieldDefinition>(paths.collection(accountId), { name, type, regex, is_required });
   }
@@ -69,7 +69,7 @@ export class FieldsResource {
    * Request sent: `{ name?, regex?, is_active? }`; omitted fields are left
    * unchanged. Response: {@link FieldDefinition}.
    */
-  update(accountId: string, fieldId: string, input: UpdateFieldInput): Promise<FieldDefinition> {
+  async update(accountId: string, fieldId: string, input: UpdateFieldInput): Promise<FieldDefinition> {
     const { name, regex, is_active } = input;
     return this.http.put<FieldDefinition>(paths.item(accountId, fieldId), { name, regex, is_active });
   }

@@ -89,6 +89,10 @@ export class Chat implements ChatHandle {
     if (adapterNames.length === 0) {
       throw new ConfigurationError("Chat requires at least one adapter");
     }
+    const identities = Object.values(options.adapters).map((adapter) => adapter.name);
+    if (new Set(identities).size !== identities.length) {
+      throw new ConfigurationError("Chat adapters must have unique names");
+    }
     this.userName = options.userName;
     this.adapters = Object.freeze({ ...options.adapters });
     this.state = options.state ?? new MemoryStateAdapter();
@@ -256,9 +260,7 @@ export class Chat implements ChatHandle {
   async disconnect(): Promise<void> {
     await this.ready.catch(() => undefined);
     const results = await Promise.allSettled(
-      Object.values(this.adapters).map((adapter) =>
-        typeof adapter.disconnect === "function" ? adapter.disconnect() : Promise.resolve(),
-      ),
+      Object.values(this.adapters).map(async (adapter) => adapter.disconnect?.()),
     );
     const failure = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
     if (failure) throw failure.reason;

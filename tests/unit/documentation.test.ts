@@ -18,7 +18,7 @@ const RESOURCE_NAMES = [
 
 describe("published documentation", () => {
   it("uses reserved example email domains and excludes local engineering notes", async () => {
-    for (const path of ["README.md", "README.en.md", "docs/API_REFERENCE.md", "docs/API_COVERAGE.md"]) {
+    for (const path of ["README.md", "README.en.md", "CHANGELOG.md", "docs/API_REFERENCE.md", "docs/API_COVERAGE.md"]) {
       const document = await readFile(new URL(`../../${path}`, import.meta.url), "utf8");
       for (const match of document.matchAll(/[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})/g)) {
         expect(match[1]).toMatch(/^example\.(?:test|com)$/);

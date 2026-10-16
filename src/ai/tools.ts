@@ -120,6 +120,7 @@ export function createChatTools(
           full_name: { type: "string", description: "Full name of the signer." },
           email: { type: "string", format: "email" },
           whatsapp_phone_number: { type: "string", description: "E.164 phone, e.g. +5511999999999." },
+          government_id: { type: "string", description: "CPF for biometric verification; CPF/CNPJ for certificate signing." },
         },
         required: accountIdRequired ? ["accountId", "full_name"] : ["full_name"],
       },
@@ -128,6 +129,7 @@ export function createChatTools(
           full_name: args.full_name,
           email: args.email,
           whatsapp_phone_number: args.whatsapp_phone_number,
+          government_id: args.government_id,
         }),
     }),
 
@@ -867,6 +869,7 @@ const DOCUMENT_STATUS_CODES: DocumentStatusCode[] = [
   "certificated",
   "rejected_by_signer",
   "pending_signature",
+  "pending_identity_review",
   "rejected_by_user",
   "failed",
 ];
@@ -895,7 +898,7 @@ function webhookEndpointFields<T extends UpdateWebhookEndpointInput>(args: T): T
 }
 
 const SIGNER_METHOD_PROPERTIES = {
-  verification_method: { type: "string", enum: ["Email", "Whatsapp", "DigitalCertificate"] },
+  verification_method: { type: "string", enum: ["Email", "Whatsapp", "DigitalCertificate", "IdDocumentFaceMatchBasic"] },
   notification_methods: { type: "array", items: { type: "string", enum: ["Email", "Whatsapp"] } },
 } as const;
 

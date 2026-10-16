@@ -10,6 +10,7 @@
  */
 
 import { withQuery, type HttpClient } from "./http.js";
+import { ConfigurationError } from "./errors.js";
 import { pageQuery } from "./internal.js";
 import type {
   CreateWebhookEndpointInput,
@@ -78,6 +79,18 @@ export class WebhooksResource {
   /** Delete an endpoint and free its slot. Scope `webhooks:write`. */
   async deleteEndpoint(accountId: string, endpointId: string): Promise<void> {
     await this.http.delete<unknown>(paths.endpoint(accountId, endpointId));
+  }
+
+  /**
+   * `DELETE /accounts/{accountId}/webhooks/endpoints?url=...` — delete by the
+   * exact registered URL and free its slot. Scope `webhooks:write`; `404`
+   * when the workspace has no matching URL. Resolves on success.
+   */
+  async deleteEndpointByUrl(accountId: string, url: string): Promise<void> {
+    if (typeof url !== "string" || !url.trim()) {
+      throw new ConfigurationError("deleteEndpointByUrl requires the registered endpoint URL");
+    }
+    await this.http.delete<unknown>(withQuery(paths.endpoints(accountId), { url }));
   }
 
   /**

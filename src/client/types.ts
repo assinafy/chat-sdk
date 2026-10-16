@@ -289,7 +289,7 @@ export type UpdateNotificationPreferences = Partial<NotificationPreferences> &
 // ---------------------------------------------------------------------------
 
 /** Verification method codes accepted by assignment/template APIs. */
-export type VerificationMethod = "Email" | "Whatsapp" | "DigitalCertificate" | (string & {});
+export type VerificationMethod = "Email" | "Whatsapp" | "DigitalCertificate" | "IdDocumentFaceMatchBasic" | (string & {});
 
 /** Notification channel codes accepted by assignment/template APIs. */
 export type NotificationMethod = "Email" | "Whatsapp" | (string & {});
@@ -331,13 +331,70 @@ export interface SignerSelf extends Signer {
   is_signature_reusable: boolean;
 }
 
+/** Provider session states; only an expired capture session may be restarted. */
+export type IdentityVerificationStatus = "Pending" | "InReview" | "Approved" | "Declined" | "Expired" | "Abandoned" | (string & {});
+
+/** `GET /signers/identity-verification` response. */
+export interface IdentityVerification {
+  can_start: boolean;
+  status: IdentityVerificationStatus | null;
+  /** Bearer capture link. Open unchanged, including its fragment; never log or persist it in the browser. */
+  url: string | null;
+  expires_at: string | null;
+  completed_at: string | null;
+}
+
+/** Explicit consent given by the signer, never inferred by the application. */
+export interface StartIdentityVerificationInput {
+  consent: true;
+}
+
+/** Hosted capture session returned by `POST /signers/identity-verification`. */
+export interface IdentityVerificationSession {
+  id: string;
+  /** Bearer capture link; preserve its fragment and keep it out of logs and browser storage. */
+  url: string;
+  expires_at: string | null;
+}
+
+/** Evidence names available only while the account's identity review is open. */
+export type IdentityReviewImage = "document_front" | "document_back" | "document_pdf" | "face";
+
+/** Account-facing identity evidence summary; optional details may be unavailable from the provider. */
+export interface SignerIdentityReview {
+  id: string;
+  status: IdentityVerificationStatus;
+  provider: "AssinafyVerify" | (string & {});
+  verification_method: "IdDocumentFaceMatchBasic" | (string & {});
+  reason_codes: Array<{ code: string; description: string }>;
+  evidence_available: boolean;
+  expected?: { name: string | null; cpf: string | null } | null;
+  document?: { type: string | null; name: string | null; cpf: string | null } | null;
+  matches?: { cpf: boolean | null; name: number | null; birth_date: boolean | null } | null;
+  checks?: Array<{ name: string; result: string; score: number | null; reasons: string[] }>;
+  images: IdentityReviewImage[];
+  ruleset_version?: string | null;
+  evidence_sha256?: string | null;
+  reviewed_by?: { id: string; name: string } | null;
+  reviewed_at?: string | null;
+  review_note?: string | null;
+  completed_at?: string | null;
+}
+
+/** Account review decision. Rejection cancels the document and notifies its participants. */
+export interface ReviewSignerIdentityInput {
+  decision: "Approved" | "Rejected";
+  /** At most 2,000 characters; recorded for the reviewer/provider, never shown to the signer. */
+  note?: string | null;
+}
+
 /** Signer creation request: `{ full_name, email?, whatsapp_phone_number?, government_id? }`. */
 export interface CreateSignerInput {
   full_name: string;
   email?: string;
   /** Required for WhatsApp verification or notification. */
   whatsapp_phone_number?: string;
-  /** CPF/CNPJ; the API normalizes it to digits. Required for `DigitalCertificate` signers. */
+  /** CPF/CNPJ for `DigitalCertificate`; a valid CPF for `IdDocumentFaceMatchBasic`. Normalized to digits. */
   government_id?: string;
 }
 
@@ -385,6 +442,7 @@ export type DocumentStatusCode =
   | "certificated"
   | "rejected_by_signer"
   | "pending_signature"
+  | "pending_identity_review"
   | "rejected_by_user"
   | "failed"
   | (string & {});
@@ -974,6 +1032,7 @@ export type WebhookEventType =
   | "signer_created"
   | "signer_email_verified"
   | "signer_whatsapp_verified"
+  | "signer_identity_verified"
   | "signer_data_confirmed"
   | "signer_viewed_document"
   | "signer_signed_document"

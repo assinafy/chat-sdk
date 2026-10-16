@@ -207,6 +207,22 @@ describe("createChatTools", () => {
     });
   });
 
+  it("supports biometric signer creation, assignments, templates and document filtering", async () => {
+    const client = fakeClient();
+    const tools = createChatTools(client);
+    await runTool(tools, "create_signer", { full_name: "Example Signer", government_id: "52998224725" });
+    expect(client.signers.create).toHaveBeenCalledWith("acct", expect.objectContaining({ government_id: "52998224725" }));
+    const signer = { id: "s1", verification_method: "IdDocumentFaceMatchBasic", notification_methods: ["Email"] };
+    await runTool(tools, "create_assignment", { documentId: "d1", method: "virtual", signers: [signer] });
+    await runTool(tools, "instantiate_template", { templateId: "t1", signers: [{ role_id: "r1", ...signer }] });
+    expect(client.assignments.create).toHaveBeenCalledWith("d1", expect.objectContaining({ signers: [signer] }));
+    expect(client.templates.instantiate).toHaveBeenCalledWith("acct", "t1", expect.objectContaining({
+      signers: [{ role_id: "r1", ...signer }],
+    }));
+    await runTool(tools, "list_documents", { status: "pending_identity_review" });
+    expect(client.documents.list).toHaveBeenCalledWith("acct", expect.objectContaining({ status: "pending_identity_review" }));
+  });
+
   it("allowlists the assignment payload sent by the AI tool", async () => {
     const client = fakeClient();
     const tools = createChatTools(client);

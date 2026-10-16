@@ -23,7 +23,7 @@ de chat, cards e IA. Cada seção assume a anterior.
 
 O SDK é um pacote com duas metades que podem ser usadas de forma independente.
 
-**O cliente da API** cobre a API REST Assinafy v1: **106 operações em 81
+**O cliente da API** cobre a API REST Assinafy v1: **112 operações em 85
 caminhos**, agrupadas em doze recursos — contas, autenticação, OAuth, usuários,
 signatários, documentos, tags, templates, assignments, campos, o fluxo de
 assinatura do signatário e webhooks. Toda operação é tipada, e o transporte
@@ -44,7 +44,7 @@ Dois documentos de referência acompanham este e vão mais fundo:
   modo de autenticação, payloads completos de requisição e resposta, as
   superfícies de chat, card, adapter e estado, e o catálogo completo de
   ferramentas de IA.
-- **[Índice de operações](./docs/API_COVERAGE.md)** — as 106 operações publicadas
+- **[Índice de operações](./docs/API_COVERAGE.md)** — as 112 operações publicadas
   mapeadas ao método do SDK, mais os pontos em que a superfície HTTP do SDK vai
   além do documento publicado.
 
@@ -582,7 +582,8 @@ inferido. Sem nenhum dos dois, ambos assumem `Email`.
 | --- | --- | --- | --- |
 | `Email` *(padrão)* | Código de uso único (OTP) por e-mail, exigido antes de assinar | `Email` | Gratuito |
 | `Whatsapp` | Código de uso único (OTP) por WhatsApp | `Whatsapp` (obrigatória) | 0,45 crédito, só em planos pagos |
-| `DigitalCertificate` | O signatário assina com o **próprio certificado ICP-Brasil — A1** (arquivo) ou **A3** (token/cartão) — pela extensão de navegador Web PKI, gerando uma assinatura **PAdES qualificada** | `Email` **ou** `Whatsapp` | 2 créditos |
+| `IdDocumentFaceMatchBasic` | Documento de identidade, foto segurando o documento e prova de vida, com consentimento biométrico explícito | `Email` **ou** `Whatsapp` | Consulte `estimateCost` |
+| `DigitalCertificate` | O signatário assina com o **próprio certificado ICP-Brasil — A1** (arquivo) ou **A3** (token/cartão) — pela extensão de navegador Web PKI, gerando uma assinatura **PAdES qualificada** | `Email` **ou** `Whatsapp` | 0,5 crédito + notificação |
 
 Apenas um método de notificação por signatário. O certificado digital exige
 ainda o recurso habilitado na conta (planos Standard e Pro), CPF ou CNPJ em
@@ -594,6 +595,74 @@ assinatura — ele responde `400`. A assinatura deles vem de um handshake de doi
 passos com a extensão Web PKI (`/v1/signers/certificate/start` + `/complete`),
 rotas **somente de produção** que o SDK deliberadamente não embrulha, já que
 dependem da extensão no navegador do signatário.
+
+### WhatsApp e certificado digital
+
+Para WhatsApp, cadastre `whatsapp_phone_number` e use
+`verification_method: "Whatsapp", notification_methods: ["Whatsapp"]` no
+signatário. Consulte `assignments.estimateCost` antes de criar o assignment;
+`assignments.whatsappNotifications` retorna as mensagens enviadas, e
+`resendToSigner` reenvia a notificação no canal escolhido. O envio por WhatsApp
+exige um plano pago.
+
+Para A1/A3, cadastre CPF ou CNPJ em `government_id` e use
+`verification_method: "DigitalCertificate"` com uma única notificação, `Email`
+ou `Whatsapp`. Coloque cada signatário de certificado sozinho em seu `step`.
+A1 e A3 são escolhidos no navegador do signatário, sem um campo adicional na
+API. Confirme os dados e aceite os termos antes de `signature.signContext`.
+Conclua a assinatura na interface Web PKI da Assinafy; depois da certificação,
+baixe o artefato `pades` com `documents.download(documentId, "pades")`.
+
+### Biometria e revisão de identidade
+
+As rotas de identidade são servidas em produção; o sandbox retorna `404` e
+rejeita estimativas com o método biométrico com `400`.
+
+`IdDocumentFaceMatchBasic` exige o recurso habilitado na conta e um CPF válido
+em `government_id`. Tanto assignments quanto templates aceitam esse método.
+
+```ts
+const opcoesBiometricas = {
+  verification_method: "IdDocumentFaceMatchBasic",
+  notification_methods: ["Email"],
+};
+await client.assignments.estimateCost(documento.id, {
+  method: "virtual", signers: [opcoesBiometricas],
+});
+await client.assignments.create(documento.id, {
+  method: "virtual", signers: [{ id: signatario.id, ...opcoesBiometricas }],
+});
+
+// No fluxo do signatário, após obter o código de acesso da notificação:
+const accessCode = "<codigo-de-acesso>";
+const identidade = await client.signature.self(accessCode);
+if (identidade.verification_method === "IdDocumentFaceMatchBasic") {
+  const estado = await client.signature.getIdentityVerification(accessCode);
+  if (estado.can_start) {
+    // Execute somente depois de o signatário consentir expressamente.
+    const sessao = await client.signature.startIdentityVerification(accessCode, { consent: true });
+    // Redirecione para sessao.url sem alterar o fragmento #t=.
+  }
+}
+```
+
+A URL de captura é uma credencial: não a registre em logs nem a persista no
+browser. Ao retornar da captura, consulte `getIdentityVerification` novamente.
+`Approved` e `InReview` permitem continuar para visualização, confirmação de
+dados, aceite dos termos e assinatura. `Pending` aguarda a captura; reinicie
+somente quando `can_start` for verdadeiro. `Expired` permite nova captura sem
+nova cobrança; `Declined` e `Abandoned` exigem novo documento e assignment.
+
+Com `InReview`, o documento assinado aguarda em `pending_identity_review`. O
+responsável da conta usa `assignments.getSignerIdentityReview`, examina as
+imagens listadas com `downloadSignerIdentityReviewImage` e registra sua decisão
+com `reviewSignerIdentity(..., { decision: "Approved", note: "..." })` ou
+`"Rejected"`. A aprovação libera a certificação quando todas as assinaturas e
+revisões terminarem. A rejeição cancela o documento e notifica signatários e
+destinatários de cópia. A nota fica restrita ao registro interno e ao provedor.
+As imagens só ficam disponíveis durante a revisão e não devem ser persistidas.
+Os [payloads completos](docs/API_REFERENCE.md#identity-verification-payloads)
+incluem estados, consentimento, evidências e decisões.
 
 ### Assignments de coleta posicionam campos na página
 
@@ -686,6 +755,8 @@ const { secret } = await client.webhooks.getEndpointSecret(accountId, endpoint.i
 Passar do limite do plano responde `403`; repetir a `url` de outro endpoint da
 conta responde `400`. `listEndpoints`, `getEndpoint`, `updateEndpoint` (envia
 só os campos informados) e `deleteEndpoint` completam o ciclo.
+`deleteEndpointByUrl(accountId, url)` remove pelo endereço exato cadastrado.
+No sandbox, essa operação retorna `404`; use a exclusão por ID nesse ambiente.
 `rotateEndpointSecret` troca o segredo e o antigo para de valer na hora. Os dois
 métodos de segredo exigem chave de API ou token de usuário — aplicações OAuth
 não os acessam. `updateSubscription`, `getSubscription` e `inactivate` continuam
@@ -855,6 +926,12 @@ modo que as mensagens seguintes chegam a `onSubscribedMessage` sem precisar de
 outra menção. `thread.get()`, `set()` e `delete()` guardam dados por thread — o
 documento em que a pessoa está trabalhando, por exemplo — pelo mesmo backend de
 estado.
+
+Desde 2.5.0, os valores de `Thread` usam `JSON.stringify([adapter.name, thread.id])`
+como ID no backend, isolando adapters com IDs iguais. Ao atualizar um backend
+persistente de 2.4.x, migre os IDs dos valores para essa tupla, indicando o
+adapter de cada thread. Os IDs de inscrição e `thread.id` continuam iguais.
+Cada adapter registrado em um `Chat` precisa de um `name` único.
 
 ### Cards renderizam em qualquer lugar
 

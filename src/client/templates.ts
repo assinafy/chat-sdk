@@ -75,7 +75,7 @@ export class TemplatesResource {
    * keyed `editor_fields` object (deprecated) is sent as the array form.
    * Response: the new {@link Document}.
    */
-  instantiate(
+  async instantiate(
     accountId: string,
     templateId: string,
     input: CreateDocumentFromTemplateInput,
@@ -91,7 +91,7 @@ export class TemplatesResource {
       })),
       editor_fields:
         editor_fields === undefined || Array.isArray(editor_fields)
-          ? editor_fields
+          ? editor_fields?.map(({ field_id, value }) => ({ field_id, value }))
           : Object.entries(editor_fields).map(([field_id, value]) => ({ field_id, value: String(value) })),
       name,
       message,
@@ -106,12 +106,16 @@ export class TemplatesResource {
    * `{ signers: [{ role_id, verification_method?, notification_methods? }] }`
    * (an array is wrapped). Response: {@link CostEstimate}.
    */
-  estimateCost(
+  async estimateCost(
     accountId: string,
     templateId: string,
     input: { signers: TemplateCostSignerInput[] } | TemplateCostSignerInput[],
   ): Promise<CostEstimate> {
-    const body = Array.isArray(input) ? { signers: input } : input;
-    return this.http.post<CostEstimate>(paths.estimate(accountId, templateId), body);
+    const signers = Array.isArray(input) ? input : input.signers;
+    return this.http.post<CostEstimate>(paths.estimate(accountId, templateId), {
+      signers: signers.map(({ role_id, verification_method, notification_methods }) => ({
+        role_id, verification_method, notification_methods,
+      })),
+    });
   }
 }

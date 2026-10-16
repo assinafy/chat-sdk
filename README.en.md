@@ -22,7 +22,7 @@ assumes the one before it.
 
 The SDK is one package with two halves that can be used independently.
 
-**The API client** covers the Assinafy v1 REST API: **106 operations across 81
+**The API client** covers the Assinafy v1 REST API: **112 operations across 85
 paths**, grouped into twelve resources — accounts, authentication, OAuth, users,
 signers, documents, tags, templates, assignments, fields, the signer-facing
 signature flow, and webhooks. Every operation is typed, and the transport
@@ -41,7 +41,7 @@ Two reference documents accompany this one and go deeper than it does:
 - **[API reference](./docs/API_REFERENCE.md)** — every public method with its
   authentication mode, complete request and response payloads, the chat, card,
   adapter, and state surfaces, and the full AI tool catalog.
-- **[API operation index](./docs/API_COVERAGE.md)** — all 106 published
+- **[API operation index](./docs/API_COVERAGE.md)** — all 112 published
   operations mapped to their SDK method, plus the places where the SDK's HTTP
   surface goes beyond the published document.
 
@@ -555,8 +555,85 @@ console.log(`Downloaded ${bytes.byteLength} certificated bytes`);
 
 Signers sharing a `step` sign in parallel; a step activates only once every
 signer in the previous one has signed. `verification_method` selects how the
-signer proves identity — `Email`, `Whatsapp`, or `DigitalCertificate` — and
+signer proves identity — `Email`, `Whatsapp`, `DigitalCertificate`, or
+`IdDocumentFaceMatchBasic` — and
 `notification_methods` selects the channels used to reach them.
+
+### Verification and notification methods
+
+Set methods per signer when creating an assignment or instantiating a template.
+Supply one side, both or neither; the missing side is inferred, and both default
+to `Email`. Exactly one notification channel is allowed per signer.
+
+| Verification | Requirements | Notification | Cost per signer |
+| --- | --- | --- | --- |
+| `Email` | Email address; one-time code before signing | `Email` | Free |
+| `Whatsapp` | WhatsApp number; paid plan; one-time code before signing | `Whatsapp` | 0.45 credit |
+| `DigitalCertificate` | Digital Certificate feature; CPF/CNPJ in `government_id`; alone in its signing step | `Email` or `Whatsapp` | 0.5 credit plus notification |
+| `IdDocumentFaceMatchBasic` | Identity verification feature; valid CPF in `government_id`; explicit biometric consent | `Email` or `Whatsapp` | Use `estimateCost` |
+
+For WhatsApp, register `whatsapp_phone_number`, then set
+`verification_method: "Whatsapp", notification_methods: ["Whatsapp"]`.
+Estimate the cost before creating the assignment. Read rendered messages through
+`assignments.whatsappNotifications` and resend through `resendToSigner`.
+
+A1 and A3 use the single `DigitalCertificate` value: the signer chooses a software
+certificate file (A1) or hardware token/card (A3) in their browser. Confirm signer
+data and accept the terms before `signature.signContext`. The ordinary signing
+endpoint returns `400` for certificate signers; they finish through Assinafy's
+Web PKI browser flow. Its production-only `/v1/signers/certificate/start` and
+`/complete` routes are outside the published OpenAPI contract. After completion,
+`documents.download(documentId, "pades")` returns the qualified PAdES artifact.
+
+### Biometric capture and identity review
+
+Identity routes are served in production; the sandbox returns `404` and rejects
+biometric cost estimates with `400`.
+
+Create the signer with a valid CPF in `government_id`, then select the biometric
+method on the assignment or template binding:
+
+```ts
+const biometricOptions = {
+  verification_method: "IdDocumentFaceMatchBasic",
+  notification_methods: ["Email"],
+};
+await client.assignments.estimateCost(document.id, {
+  method: "virtual", signers: [biometricOptions],
+});
+await client.assignments.create(document.id, {
+  method: "virtual", signers: [{ id: signer.id, ...biometricOptions }],
+});
+
+// In the signer flow, after obtaining the access code from the notification:
+const accessCode = "<signer-access-code>";
+const identity = await client.signature.self(accessCode);
+if (identity.verification_method === "IdDocumentFaceMatchBasic") {
+  const state = await client.signature.getIdentityVerification(accessCode);
+  if (state.can_start) {
+    // Run only after the signer explicitly consents to biometric processing.
+    const session = await client.signature.startIdentityVerification(accessCode, { consent: true });
+    // Redirect to session.url unchanged, including its #t= fragment.
+  }
+}
+```
+
+The capture URL is a bearer credential: keep it out of logs and browser storage.
+After capture, read `getIdentityVerification` again. `Approved` and `InReview`
+allow viewing the document, confirming data, accepting terms and signing.
+`Pending` waits for capture; start only when `can_start` is true. An `Expired`
+capture may restart without another charge. `Declined` or `Abandoned` requires
+a new document and assignment.
+
+An `InReview` result holds the fully signed document at `pending_identity_review`.
+The account reviewer reads `assignments.getSignerIdentityReview`, inspects the
+listed images with `downloadSignerIdentityReviewImage`, then records their
+human decision through `reviewSignerIdentity(..., { decision: "Approved",
+note: "..." })` or `"Rejected"`. Approval releases certification after every
+signature and review completes. Rejection cancels the document and notifies
+signers and copy receivers. The note is never shown to signers. Images are
+available only during review and must not be persisted. See the
+[complete payloads](docs/API_REFERENCE.md#identity-verification-payloads).
 
 ### Collect assignments place fields on the page
 
@@ -649,6 +726,8 @@ const { secret } = await client.webhooks.getEndpointSecret(accountId, endpoint.i
 Going past the plan's limit answers `403`; reusing another endpoint's `url`
 answers `400`. `listEndpoints`, `getEndpoint`, `updateEndpoint` (sends only the
 fields given) and `deleteEndpoint` complete the lifecycle.
+`deleteEndpointByUrl(accountId, url)` removes the exact registered URL. The
+sandbox returns `404` for this operation; use deletion by ID there.
 `rotateEndpointSecret` replaces the secret and the old one stops working
 immediately. Both secret methods need an API key or a user token — OAuth
 applications cannot reach them. `updateSubscription`, `getSubscription` and
@@ -814,6 +893,12 @@ That third rule is what makes multi-turn conversations work. Calling
 messages in it reach `onSubscribedMessage` without needing another mention.
 `thread.get()`, `set()`, and `delete()` store per-thread data — the document a
 user is currently working on, for instance — through the same state backend.
+
+Since 2.5.0, `Thread` values use `JSON.stringify([adapter.name, thread.id])` as the
+backend ID, isolating equal IDs on different adapters. When upgrading a persistent
+backend from 2.4.x, migrate value IDs to this tuple with each thread's owning
+adapter. Subscription IDs and `thread.id` remain unchanged. Each adapter
+registered in a `Chat` must have a unique `name`.
 
 ### Cards render everywhere
 

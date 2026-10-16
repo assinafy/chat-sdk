@@ -15,7 +15,7 @@ function mkResponse(body: unknown, headers: Record<string, string> = {}): Respon
   });
 }
 
-function makeClient(responses: unknown[] = []): { client: AssinafyClient; requests: RecordedRequest[] } {
+function makeClient(responses: unknown[] = [], accessToken?: string): { client: AssinafyClient; requests: RecordedRequest[] } {
   const requests: RecordedRequest[] = [];
   const fetchImpl = vi.fn().mockImplementation(async (url: string, init: RequestInit = {}) => {
     const method = init.method ?? "GET";
@@ -32,7 +32,8 @@ function makeClient(responses: unknown[] = []): { client: AssinafyClient; reques
       : mkResponse(next);
   });
   const client = new AssinafyClient({
-    apiKey: "test-key",
+    apiKey: accessToken ? undefined : "test-key",
+    accessToken,
     accountId: "acct",
     baseUrl: "https://sandbox.test/v1",
     fetch: fetchImpl as unknown as typeof fetch,
@@ -215,6 +216,46 @@ describe("AssinafyClient resource paths", () => {
       signers: [{ verification_method: "DigitalCertificate" }],
       entries: [{ page_id: "p1", fields: [] }],
     });
+  });
+
+  it.each(["Email", "Whatsapp", "DigitalCertificate", "IdDocumentFaceMatchBasic"])(
+    "forwards %s verification and its notification through assignment and template flows",
+    async (verification_method) => {
+      const { client, requests } = makeClient([{}, {}, {}, {}]);
+      const options = { verification_method, notification_methods: [verification_method === "Whatsapp" ? "Whatsapp" : "Email"] };
+      await client.assignments.create("d", { method: "virtual", signers: [{ id: "s", ...options }] });
+      await client.assignments.estimateCost("d", { method: "virtual", signers: [options] });
+      await client.templates.instantiate("acct", "t", { signers: [{ role_id: "r", id: "s", ...options }] });
+      await client.templates.estimateCost("acct", "t", { signers: [{ role_id: "r", ...options }] });
+      expect(requests.map((request) => (request.body as { signers: unknown[] }).signers)).toEqual([
+        [{ id: "s", ...options }], [options], [{ role_id: "r", id: "s", ...options }], [{ role_id: "r", ...options }],
+      ]);
+    },
+  );
+
+  it("omits undeclared assignment and template-estimate properties", async () => {
+    const { client, requests } = makeClient([{}, {}]);
+    await client.assignments.create("d", {
+      method: "virtual", extra: "private", signers: [{ id: "s", extra: "private" }],
+    } as never);
+    await client.templates.estimateCost("acct", "t", {
+      extra: "private", signers: [{ role_id: "r", id: "s", extra: "private" }],
+    } as never);
+    expect(requests.map((r) => r.body)).toEqual([
+      { method: "virtual", signers: [{ id: "s" }] }, { signers: [{ role_id: "r" }] },
+    ]);
+  });
+
+  it("rejects field and template preparation errors through promises", async () => {
+    const { client, requests } = makeClient();
+    const calls = [
+      () => client.fields.create("acct", null as never),
+      () => client.fields.update("acct", "f", null as never),
+      () => client.templates.instantiate("acct", "t", { signers: null } as never),
+      () => client.templates.estimateCost("acct", "t", { signers: null } as never),
+    ];
+    for (const call of calls) await expect(call()).rejects.toBeInstanceOf(TypeError);
+    expect(requests).toHaveLength(0);
   });
 
   it("covers assignment resend, resend-estimate, reset-expiration, and notifications", async () => {
@@ -505,6 +546,110 @@ describe("AssinafyClient resource paths", () => {
     expect(new URL(requests[6]!.url).searchParams.get("signer-access-code")).toBe("code");
   });
 
+  it.each(["apiKey", "bearer"])("uses only the signer code for biometric sessions with %s clients", async (kind) => {
+    const state = { can_start: true, status: null, url: null, expires_at: null, completed_at: null };
+    const session = { id: "iv1", url: "https://example.test/capture#t=opaque", expires_at: null };
+    const { client, requests } = makeClient([state, session], kind === "bearer" ? "workspace-token" : undefined);
+    const signature = client.signature;
+
+    await expect(signature.getIdentityVerification("code +/?")).resolves.toEqual(state);
+    await expect(signature.startIdentityVerification("code +/?", {
+      consent: true, extra: "not-sent",
+    } as never)).resolves.toEqual(session);
+
+    expect(requests.map((r) => r.method)).toEqual(["GET", "POST"]);
+    for (const request of requests) {
+      const url = new URL(request.url);
+      expect(url.pathname).toBe("/v1/signers/identity-verification");
+      expect(url.searchParams.get("signer-access-code")).toBe("code +/?");
+      expect(new Headers(request.init.headers).has("authorization")).toBe(false);
+      expect(new Headers(request.init.headers).has("x-api-key")).toBe(false);
+    }
+    expect(requests[0]!.body).toBeUndefined();
+    expect(requests[1]!.body).toEqual({ consent: true });
+  });
+
+  it("requires explicit biometric consent before making a request", async () => {
+    const { client, requests } = makeClient();
+    for (const input of [undefined, null, {}, { consent: false }, { consent: "true" }]) {
+      await expect(client.signature.startIdentityVerification("code", input as never))
+        .rejects.toThrow(ConfigurationError);
+    }
+    expect(requests).toHaveLength(0);
+  });
+
+  it("never retries biometric session creation after a server error", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response("unavailable", { status: 503 }));
+    const client = new AssinafyClient({ fetch: fetchImpl as typeof fetch, maxRetries: 2 });
+    await expect(client.signature.startIdentityVerification("code", { consent: true }))
+      .rejects.toMatchObject({ status: 503 });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it("reads and decides identity reviews with workspace credentials and declared fields only", async () => {
+    const review = { id: "iv1", status: "InReview", images: ["face"], evidence_available: true };
+    const { client, requests } = makeClient([review, { ...review, status: "Approved" }, { ...review, status: "Declined" }]);
+    await expect(client.assignments.getSignerIdentityReview("doc /", "assignment +", "signer ?"))
+      .resolves.toEqual(review);
+    await client.assignments.reviewSignerIdentity("doc /", "assignment +", "signer ?", {
+      decision: "Approved", note: null, extra: "not-sent",
+    } as never);
+    await client.assignments.reviewSignerIdentity("doc /", "assignment +", "signer ?", { decision: "Rejected" });
+
+    const path = "/v1/documents/doc%20%2F/assignments/assignment%20%2B/signers/signer%20%3F/identity-verification";
+    expect(requests.map((r) => `${r.method} ${new URL(r.url).pathname}`)).toEqual([
+      `GET ${path}`, `POST ${path}/review`, `POST ${path}/review`,
+    ]);
+    expect(requests[1]!.body).toEqual({ decision: "Approved", note: null });
+    expect(requests[2]!.body).toEqual({ decision: "Rejected" });
+    for (const request of requests) {
+      expect(new Headers(request.init.headers).get("x-api-key")).toBe("test-key");
+      expect(new URL(request.url).search).toBe("");
+    }
+  });
+
+  it("validates identity decisions and note length through promise rejection", async () => {
+    const { client, requests } = makeClient();
+    for (const input of [
+      { decision: "Declined" }, { decision: "Approved", note: 1 },
+      { decision: "Approved", note: "a".repeat(2001) },
+    ]) {
+      await expect(client.assignments.reviewSignerIdentity("d", "a", "s", input as never))
+        .rejects.toThrow(ConfigurationError);
+    }
+    expect(requests).toHaveLength(0);
+    await client.assignments.reviewSignerIdentity("d", "a", "s", { decision: "Approved", note: "😀".repeat(2000) });
+    expect(requests).toHaveLength(1);
+  });
+
+  it("returns identity review images as an untouched binary Response", async () => {
+    const response = new Response(new Uint8Array([0xff, 0, 0xfe]), {
+      headers: { "content-type": "image/jpeg", "cache-control": "no-store" },
+    });
+    const fetchImpl = vi.fn().mockResolvedValue(response);
+    const client = new AssinafyClient({ apiKey: "test-key", fetch: fetchImpl as typeof fetch });
+    await expect(client.assignments.downloadSignerIdentityReviewImage("d", "a", "s", "face"))
+      .resolves.toBe(response);
+    expect(fetchImpl.mock.calls[0]![0]).toBe(
+      "https://api.assinafy.com.br/v1/documents/d/assignments/a/signers/s/identity-verification/images/face",
+    );
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(new Uint8Array([0xff, 0, 0xfe]));
+  });
+
+  it("deletes a webhook endpoint by its exact URL and rejects an empty URL", async () => {
+    const { client, requests } = makeClient([[]]);
+    const url = "https://example.test/hook?tenant=a+b&key=value#fragment";
+    await expect(client.webhooks.deleteEndpointByUrl("account /", url)).resolves.toBeUndefined();
+    expect(requests[0]!.method).toBe("DELETE");
+    expect(new URL(requests[0]!.url).pathname).toBe("/v1/accounts/account%20%2F/webhooks/endpoints");
+    expect(new URL(requests[0]!.url).searchParams.get("url")).toBe(url);
+    expect(requests[0]!.body).toBeUndefined();
+    for (const value of ["", "  ", undefined]) {
+      await expect(client.webhooks.deleteEndpointByUrl("acct", value as never)).rejects.toThrow(ConfigurationError);
+    }
+    expect(requests).toHaveLength(1);
+  });
+
   it("preserves nullable assignment-signer notification history", async () => {
     const { client } = makeClient([{
       id: "s1",
@@ -605,6 +750,8 @@ describe("AssinafyClient resource paths", () => {
     const png = new Uint8Array([1]);
     const blankCodeCalls: Array<(code: string) => Promise<unknown>> = [
       (code) => client.signature.self(code),
+      (code) => client.signature.getIdentityVerification(code),
+      (code) => client.signature.startIdentityVerification(code, { consent: true }),
       (code) => client.signature.acceptTerms(code),
       (code) => client.signature.verify(code, "123456"),
       (code) => client.signature.upload(code, png),

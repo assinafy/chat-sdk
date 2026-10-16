@@ -34,6 +34,7 @@ export class Thread implements ThreadLike {
   readonly originatingMessage?: IncomingMessage;
 
   private readonly state: ChatState;
+  private readonly stateThreadId: string;
   private readonly ready?: Promise<void>;
 
   constructor(args: {
@@ -46,6 +47,7 @@ export class Thread implements ThreadLike {
     this.id = args.id;
     this.adapter = args.adapter;
     this.state = args.state;
+    this.stateThreadId = JSON.stringify([args.adapter.name, args.id]);
     this.originatingMessage = args.originatingMessage;
     this.ready = args.ready;
   }
@@ -73,17 +75,17 @@ export class Thread implements ThreadLike {
 
   /** Read a per-thread KV value. */
   get<T>(key: string): Promise<T | undefined> {
-    return this.state.getThreadValue<T>(this.id, key);
+    return this.state.getThreadValue<T>(this.stateThreadId, key);
   }
 
   /** Write a per-thread KV value. */
   set<T>(key: string, value: T): Promise<void> {
-    return this.state.setThreadValue<T>(this.id, key, value);
+    return this.state.setThreadValue<T>(this.stateThreadId, key, value);
   }
 
   /** Delete a per-thread KV value. */
   delete(key: string): Promise<void> {
-    return this.state.deleteThreadValue(this.id, key);
+    return this.state.deleteThreadValue(this.stateThreadId, key);
   }
 }
 

@@ -116,20 +116,24 @@ export interface VerifyStandardWebhookOptions {
 export function verifyStandardWebhook(options: VerifyStandardWebhookOptions): true {
   assertSecret(options.secret);
   if (!options.id) throw new WebhookSignatureError("Webhook id is missing");
+  if (typeof options.signature !== "string") throw new WebhookSignatureError("Webhook signature is missing");
   assertFresh(options.timestamp, options.toleranceSeconds ?? 300);
 
-  const key = Buffer.from(options.secret.replace(/^whsec_/, ""), "base64");
-  if (key.length === 0) throw new WebhookSignatureError("Webhook secret is not valid base64");
+  const key = decodeBase64(options.secret.replace(/^whsec_/, ""));
   const expected = createHmac("sha256", key)
     .update(`${options.id}.${options.timestamp}.`)
     .update(toBytes(options.body))
     .digest();
 
   const matches = options.signature.split(" ").some((entry) => {
-    const [version, value] = entry.split(",", 2);
-    if (version !== "v1" || !value) return false;
-    const provided = Buffer.from(value, "base64");
-    return provided.length === expected.length && timingSafeEqual(provided, expected);
+    const parts = entry.split(",");
+    if (parts.length !== 2 || parts[0] !== "v1" || !parts[1]) return false;
+    try {
+      const provided = decodeBase64(parts[1]);
+      return provided.length === expected.length && timingSafeEqual(provided, expected);
+    } catch {
+      return false;
+    }
   });
   if (!matches) throw new WebhookSignatureError("Webhook signature does not match");
   return true;
@@ -138,7 +142,7 @@ export function verifyStandardWebhook(options: VerifyStandardWebhookOptions): tr
 function assertSecret(secret: string): void {
   // An empty secret makes every signature derivable by an attacker, so a
   // misconfigured secret must fail closed rather than "verify" forged requests.
-  if (!secret) throw new WebhookSignatureError("Webhook secret is missing or empty");
+  if (typeof secret !== "string" || !secret) throw new WebhookSignatureError("Webhook secret is missing or empty");
 }
 
 function assertTolerance(tolerance: number): void {
@@ -183,6 +187,7 @@ function toBytes(payload: string | Uint8Array): Uint8Array {
 }
 
 function decodeSignature(signature: string, encoding: "hex" | "base64"): Buffer {
+  if (typeof signature !== "string") throw new WebhookSignatureError("Webhook signature is missing");
   // Strip an optional algorithm prefix (Slack `v0=…`, GitHub `sha256=…`).
   // We only treat `=` as a delimiter when it's preceded by a short
   // alphanumeric token AND followed by non-padding content. That avoids
@@ -201,16 +206,19 @@ function decodeSignature(signature: string, encoding: "hex" | "base64"): Buffer 
     if (!/^(?:[0-9a-fA-F]{2})+$/.test(encoded)) {
       throw new WebhookSignatureError("Webhook signature is not valid hex");
     }
-  } else {
-    const unpadded = encoded.replace(/=+$/, "");
-    if (
-      !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded) ||
-      unpadded.length % 4 === 1 ||
-      (encoded.length !== unpadded.length && encoded.length % 4 !== 0)
-    ) {
-      throw new WebhookSignatureError("Webhook signature is not valid base64");
-    }
-  }
+  } else return decodeBase64(encoded);
 
   return Buffer.from(encoded, encoding);
+}
+
+function decodeBase64(encoded: string): Buffer {
+  const unpadded = encoded.replace(/=+$/, "");
+  if (
+    !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded) ||
+    unpadded.length % 4 === 1 ||
+    (encoded.length !== unpadded.length && encoded.length % 4 !== 0)
+  ) {
+    throw new WebhookSignatureError("Webhook value is not valid base64");
+  }
+  return Buffer.from(encoded, "base64");
 }
