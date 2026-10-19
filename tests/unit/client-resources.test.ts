@@ -202,20 +202,29 @@ describe("AssinafyClient resource paths", () => {
     expect(requests[1]!.body).toEqual({ method: "collect", entries: [{ page_id: "p1", fields: [] }] });
   });
 
-  it("sends signers alongside entries for a collect estimate", async () => {
-    const { client, requests } = makeClient([{}]);
-
-    await client.assignments.estimateCost("doc 1", {
-      method: "collect",
-      signers: [{ verification_method: "DigitalCertificate" }],
+  it("rejects non-virtual digital-certificate assignments with a stable code", async () => {
+    const { client, requests } = makeClient();
+    const collect = {
+      method: "collect" as const,
+      signers: [{ verification_method: "DigitalCertificate" as const }],
       entries: [{ page_id: "p1", fields: [] }],
-    });
+    };
 
-    expect(requests[0]!.body).toEqual({
-      method: "collect",
-      signers: [{ verification_method: "DigitalCertificate" }],
-      entries: [{ page_id: "p1", fields: [] }],
-    });
+    for (const call of [
+      () => client.assignments.create("doc", {
+        ...collect,
+        signers: [{ id: "s1", verification_method: "DigitalCertificate" }],
+      }),
+      () => client.assignments.estimateCost("doc", collect),
+      () => client.assignments.estimateCost("doc", {
+        signers: [{ verification_method: "DigitalCertificate" }],
+      }),
+    ]) {
+      await expect(call()).rejects.toMatchObject({
+        code: "DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL",
+      });
+    }
+    expect(requests).toHaveLength(0);
   });
 
   it.each(["Email", "Whatsapp", "DigitalCertificate", "IdDocumentFaceMatchBasic"])(

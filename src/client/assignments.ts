@@ -43,6 +43,8 @@ const paths = {
     `/documents/${encodeURIComponent(documentId)}/assignments/${encodeURIComponent(assignmentId)}/signers/${encodeURIComponent(signerId)}/identity-verification`,
 };
 
+const DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL = "DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL";
+
 /** Signature requests: create, price, resend, re-expire and inspect assignments (workspace credentials). */
 export class AssignmentsResource {
   /** Signer-facing operations reached through {@link sign} and {@link decline}. */
@@ -71,8 +73,9 @@ export class AssignmentsResource {
    * notification_methods?: ("Email" | "Whatsapp")[], step? }], entries?,
    * message?, expires_at?, copy_receivers? }`. `entries` (page placements) is
    * required for `collect`. The `signerIds`/`signer_ids` aliases are
-   * normalized into `signers`. Response: the created {@link Assignment},
-   * including `signing_urls`.
+   * normalized into `signers`. `DigitalCertificate` signers require
+   * `method: "virtual"`. Response: the created {@link Assignment}, including
+   * `signing_urls`.
    */
   async create(documentId: string, input: CreateAssignmentInput): Promise<Assignment> {
     const body = normalizeAssignmentInput(input);
@@ -82,6 +85,7 @@ export class AssignmentsResource {
     if (input.method === "collect" && (!input.entries || input.entries.length === 0)) {
       throw new ConfigurationError("Collect assignments require at least one field entry");
     }
+    assertDigitalCertificateMethod(input.method, body.signers);
     return this.http.post<Assignment>(paths.collection(documentId), body);
   }
 
@@ -94,7 +98,8 @@ export class AssignmentsResource {
    * are not sent; each `signer_ids`/`signerIds` alias entry counts as one
    * Email signer (`{}`). `signers` is required for `virtual` (and when
    * `method` is omitted) and `entries` for `collect`; both are checked before
-   * the request. Response: {@link CostEstimate} — `documents`, `credits`,
+   * the request. `DigitalCertificate` signers require `method: "virtual"`.
+   * Response: {@link CostEstimate} — `documents`, `credits`,
    * `needs_extra_document`, `extra_document_cost`, `total_credits`,
    * `breakdown[]`, `document_balance`, `credit_balance`,
    * `has_sufficient_resources`, `blocking_reason`, `message`.
@@ -110,6 +115,7 @@ export class AssignmentsResource {
     } else if (signers.length === 0) {
       throw new ConfigurationError("AssignmentsResource.estimateCost requires at least one signer");
     }
+    assertDigitalCertificateMethod(input.method, signers);
     return this.http.post<CostEstimate>(paths.estimate(documentId), {
       method: input.method,
       ...(signers.length > 0 ? { signers } : {}),
@@ -231,6 +237,17 @@ export class AssignmentsResource {
     return this.http.post<SignerIdentityReview>(
       `${paths.identityVerification(documentId, assignmentId, signerId)}/review`, { decision, note },
     );
+  }
+}
+
+function assertDigitalCertificateMethod(
+  method: CreateAssignmentInput["method"] | EstimateAssignmentCostInput["method"],
+  signers: EstimateAssignmentSignerInput[] | undefined,
+): void {
+  if (method !== "virtual" && signers?.some(({ verification_method }) => verification_method === "DigitalCertificate")) {
+    throw new ConfigurationError('DigitalCertificate signers require method: "virtual"', {
+      code: DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL,
+    });
   }
 }
 

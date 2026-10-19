@@ -135,7 +135,7 @@ try {
 | Error class | Added fields / use |
 | --- | --- |
 | `AssinafyError` | Base class for SDK-defined errors |
-| `ConfigurationError` | Invalid client URL, credential combination, transport setting, or request option |
+| `ConfigurationError` | Invalid client URL, credential combination, transport setting, or request option; `code` identifies documented, branchable request errors |
 | `ApiError` | `status`, parsed `body`, redacted `path`, and uppercase `method` |
 | `OAuthError` | Extends `ApiError`; `error`, `errorDescription`, and optional `scope` |
 | `NotImplementedError` | Unsupported adapter `adapter` and `operation` |
@@ -1929,6 +1929,14 @@ requires at least one signer from one of these sources. A `collect` assignment
 also requires at least one `entries` item; invalid inputs are rejected before
 transport. Each `copy_receivers` value is the ID of an existing signer record.
 
+`DigitalCertificate` signers require `method: "virtual"`. Their Web PKI flow
+completes a virtual signing item, while the ordinary signing endpoint refuses
+certificate signers, so a `collect` assignment cannot be completed. Creation
+and cost estimation reject any other or omitted method before transport with a
+`ConfigurationError` whose stable `code` is
+`DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL`. A template with placed signer fields is
+also a collect assignment and must not bind a `DigitalCertificate` signer.
+
 #### Estimate assignment cost request
 
 ```json
@@ -1948,7 +1956,8 @@ transport. Each `copy_receivers` value is the ID of an existing signer record.
 for `collect`; the SDK checks both before sending. Each signer may be `{}` to
 price the Email default. Signer ids do not affect cost and are not sent: a
 deprecated `id` in a signer entry is dropped, and each `signerIds`/`signer_ids`
-alias entry is sent as `{}`.
+alias entry is sent as `{}`. The `DigitalCertificate` virtual-only rule and
+stable error code described above apply here too.
 
 #### Reset expiration request
 

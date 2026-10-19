@@ -15,6 +15,13 @@ export class AssinafyError extends Error {
 /** Thrown when the SDK is misconfigured (e.g. missing API key). */
 export class ConfigurationError extends AssinafyError {
   override readonly name = "ConfigurationError";
+  /** Stable machine-readable code for errors that applications may handle. */
+  readonly code?: string;
+
+  constructor(message?: string, options?: ErrorOptions & { code?: string }) {
+    super(message, options);
+    this.code = options?.code;
+  }
 }
 
 /** Constructor arguments shared by {@link ApiError} and its subclasses. */
