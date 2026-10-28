@@ -73,8 +73,9 @@ export class SignersResource {
    * `POST /accounts/{accountId}/signers` — request `{ full_name, email?,
    * whatsapp_phone_number?, government_id? }`. Response: the new {@link Signer}.
    */
-  create(accountId: string, input: CreateSignerInput): Promise<Signer> {
-    return this.http.post<Signer>(paths.collection(accountId), input);
+  async create(accountId: string, input: CreateSignerInput): Promise<Signer> {
+    const { full_name, email, whatsapp_phone_number, government_id } = input;
+    return this.http.post<Signer>(paths.collection(accountId), { full_name, email, whatsapp_phone_number, government_id });
   }
 
   /** `GET /accounts/{accountId}/signers/{signerId}` — one {@link Signer}. */
@@ -87,8 +88,9 @@ export class SignersResource {
    * email?, whatsapp_phone_number?, government_id? }`. Response: the updated
    * {@link Signer}.
    */
-  update(accountId: string, signerId: string, input: UpdateSignerInput): Promise<Signer> {
-    return this.http.put<Signer>(paths.item(accountId, signerId), input);
+  async update(accountId: string, signerId: string, input: UpdateSignerInput): Promise<Signer> {
+    const { full_name, email, whatsapp_phone_number, government_id } = input;
+    return this.http.put<Signer>(paths.item(accountId, signerId), { full_name, email, whatsapp_phone_number, government_id });
   }
 
   /** `DELETE /accounts/{accountId}/signers/{signerId}` — resolves on success. */

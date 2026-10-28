@@ -15,12 +15,12 @@ export interface TestEnv {
 
 const SANDBOX_BASE_URL = "https://sandbox.assinafy.com.br/v1";
 
-/** Space live requests below the sandbox's 120/minute authenticated quota, including cleanup. */
-export function createSandboxFetch(): typeof fetch {
+/** Pace live requests, including cleanup, without retrying mutations. */
+export function createLiveFetch(intervalMs = 650): typeof fetch {
   let nextRequestAt = 0;
   return async (input, init) => {
     const sendAt = Math.max(Date.now(), nextRequestAt);
-    nextRequestAt = sendAt + 650;
+    nextRequestAt = sendAt + intervalMs;
     await new Promise((resolve) => setTimeout(resolve, Math.max(0, sendAt - Date.now())));
     return fetch(input, init);
   };

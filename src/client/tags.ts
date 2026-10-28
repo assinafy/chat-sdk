@@ -44,13 +44,15 @@ export class TagsResource {
   }
 
   /** `POST /accounts/{accountId}/tags` — request `{ name, color? }`; response: the new {@link Tag}. */
-  create(accountId: string, input: CreateTagInput): Promise<Tag> {
-    return this.http.post<Tag>(paths.collection(accountId), input);
+  async create(accountId: string, input: CreateTagInput): Promise<Tag> {
+    const { name, color } = input;
+    return this.http.post<Tag>(paths.collection(accountId), { name, color });
   }
 
   /** `PUT /accounts/{accountId}/tags/{tagId}` — request `{ name?, color? }`; response: the {@link Tag}. */
-  update(accountId: string, tagId: string, input: UpdateTagInput): Promise<Tag> {
-    return this.http.put<Tag>(paths.item(accountId, tagId), input);
+  async update(accountId: string, tagId: string, input: UpdateTagInput): Promise<Tag> {
+    const { name, color } = input;
+    return this.http.put<Tag>(paths.item(accountId, tagId), { name, color });
   }
 
   /**

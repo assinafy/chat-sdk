@@ -769,7 +769,7 @@ function toSearchParams(params: AuthorizationCallbackParams): URLSearchParams {
   if (params instanceof URL) return params.searchParams;
   if (typeof params === "string") {
     // A full callback URL, or the bare `code=…&state=…` query behind it.
-    return params.includes("://")
+    return /^https?:\/\//i.test(params)
       ? new URL(params).searchParams
       : new URLSearchParams(params.replace(/^\?/, ""));
   }

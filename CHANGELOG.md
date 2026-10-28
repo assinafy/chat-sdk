@@ -5,6 +5,41 @@ All notable changes to `@assinafy/chat-sdk` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.0] - 2026-10-28
+
+### Added
+
+- Contract lifecycle management through `client.contracts`: listing, terms,
+  amendment families, renewal and termination, with timestamp preconditions.
+- Contract notification preferences, typed contract webhook events and the
+  delivered `WebhookEvent` payload.
+- Template signer bindings using email, name and WhatsApp phone number.
+- Assignment workspace/sort filters, document search/activity sorting and
+  webhook endpoint URL filtering.
+
+### Changed
+
+- Requests send only declared fields while preserving nullable and free-form
+  values supported by the operation.
+- Resend estimates expose `ResendCostEstimate`; `credit_balance` may be null.
+  Assignment `document_id` and `sender_email` may also be null. Existing callers
+  should handle those values; legacy optional estimate fields remain available.
+- Webhook endpoint responses include held-delivery state and optional one-time
+  secrets; dispatches include attempt and retry metadata.
+- Development and releases use Node.js 26.13.0 LTS. Node.js 24 remains supported
+  and is tested alongside Node.js 26.
+- Vitest and its coverage provider use the patched 4.1.12 release.
+
+### Fixed
+
+- OAuth callback parsing accepts unescaped issuer URLs in query strings.
+- The OAuth example keeps refresh and disconnect operations attached to their
+  original connection during a reconnect.
+- Error constructors retain `instanceof` identity across package subpaths in
+  both ESM and CommonJS builds. SDK argument failures use `ConfigurationError`.
+- Markdown URL rendering preserves literal entities and query separators.
+- AI webhook create/update results omit signing secrets.
+
 ## [2.5.1] - 2026-10-19
 
 ### Fixed

@@ -19,6 +19,7 @@ import type {
   ListAssignmentsQuery,
   IdentityReviewImage,
   Page,
+  ResendCostEstimate,
   ResendNotificationResult,
   ReviewSignerIdentityInput,
   SignFieldEntry,
@@ -55,13 +56,18 @@ export class AssignmentsResource {
   }
 
   /**
-   * `GET /assignments` — the assignments of the authenticated user's current
-   * account. Query: `page`, `per-page` (1–100). Returns {@link Assignment}
+   * `GET /assignments` — the workspace's assignments. Pass `accountId` unless
+   * using OAuth, which selects its connected workspace. Query: `accountId`,
+   * `sort`, `page`, `per-page` (1–100). Returns {@link Assignment}
    * objects with `X-Pagination-*` metadata.
    */
   async list(query: ListAssignmentsQuery = {}): Promise<Page<Assignment>> {
     return this.http.getPage<Assignment>(
-      withQuery(paths.list(), pageQuery(query.page, query.perPage)),
+      withQuery(paths.list(), {
+        accountId: query.accountId,
+        sort: query.sort,
+        ...pageQuery(query.page, query.perPage),
+      }),
     );
   }
 
@@ -86,7 +92,10 @@ export class AssignmentsResource {
       throw new ConfigurationError("Collect assignments require at least one field entry");
     }
     assertDigitalCertificateMethod(input.method, body.signers);
-    return this.http.post<Assignment>(paths.collection(documentId), body);
+    return this.http.post<Assignment>(paths.collection(documentId), {
+      ...body,
+      entries: collectEntries(input.entries),
+    });
   }
 
   /**
@@ -125,8 +134,8 @@ export class AssignmentsResource {
 
   /**
    * `PUT /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/resend`
-   * — resend the signature request on the signer's channels (Email and/or
-   * WhatsApp). Response: `{ is_sent, document_id, signer_id }`.
+   * — resend the signature request on the signer's notification channel
+   * (Email or WhatsApp). Response: `{ is_sent, document_id, signer_id }`.
    */
   resendToSigner(
     documentId: string,
@@ -138,14 +147,16 @@ export class AssignmentsResource {
 
   /**
    * `POST /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/estimate-resend-cost`
-   * — price a resend before sending it. Response: {@link CostEstimate}.
+   * — price a resend before sending it. Response: {@link ResendCostEstimate},
+   * with `total`, `breakdown`, nullable `credit_balance` and
+   * `has_sufficient_credits`. A resend consumes no document.
    */
   estimateResendCost(
     documentId: string,
     assignmentId: string,
     signerId: string,
-  ): Promise<CostEstimate> {
-    return this.http.post<CostEstimate>(paths.signerResendEstimate(documentId, assignmentId, signerId));
+  ): Promise<ResendCostEstimate> {
+    return this.http.post<ResendCostEstimate>(paths.signerResendEstimate(documentId, assignmentId, signerId));
   }
 
   /**
@@ -188,6 +199,8 @@ export class AssignmentsResource {
    * `GET /documents/{documentId}/assignments/{assignmentId}/whatsapp-notifications`
    * — the WhatsApp messages sent for an assignment, as rendered. Response:
    * `[{ sent_at, header, body, buttons: [{ text }], phone_number, signer_id }]`.
+   * Sandbox/stage simulate delivery and include button URLs with signer access
+   * and verification codes; production strips the URLs. Treat them as credentials.
    */
   whatsappNotifications(documentId: string, assignmentId: string): Promise<WhatsAppNotification[]> {
     return this.http.get<WhatsAppNotification[]>(paths.whatsappNotifications(documentId, assignmentId));
@@ -259,7 +272,7 @@ function assertDigitalCertificateMethod(
 function normalizeAssignmentInput(
   input: CreateAssignmentInput | EstimateAssignmentCostInput,
 ): Record<string, unknown> & { signers?: EstimateAssignmentSignerInput[] } {
-  const { signerIds, signer_ids, signers, method, entries } = input;
+  const { signerIds, signer_ids, signers, method } = input;
   const { expiration, expires_at, message, copy_receivers } = input as CreateAssignmentInput;
   const ids = [...(signer_ids ?? []), ...(signerIds ?? [])];
   const explicit = signers ?? [];
@@ -275,10 +288,22 @@ function normalizeAssignmentInput(
   });
   return {
     method,
-    entries,
     message,
     copy_receivers,
     expires_at: expires_at === undefined ? expiration : expires_at,
     ...(merged.length > 0 ? { signers: merged } : {}),
   };
+}
+
+function collectEntries(entries: CreateAssignmentInput["entries"]): CreateAssignmentInput["entries"] {
+  return entries == null ? entries : entries.map(({ page_id, fields }) => ({
+    page_id,
+    fields: fields == null ? fields : fields.map(({ signer_id, field_id, display_settings }) => {
+      if (display_settings != null) {
+        const { left, top, width, height, fontSize, fontFamily, backgroundColor } = display_settings;
+        display_settings = { left, top, width, height, fontSize, fontFamily, backgroundColor };
+      }
+      return { signer_id, field_id, display_settings };
+    }),
+  }));
 }

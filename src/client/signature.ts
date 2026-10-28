@@ -245,7 +245,7 @@ export class SignatureResource {
   ): Promise<void> {
     await this.signer.post<unknown>(
       withAccessCode(paths.submitAssignment(documentId, assignmentId), accessCode),
-      entries,
+      entries.map(({ itemId, fieldId, pageId, value }) => ({ itemId, fieldId, pageId, value })),
     );
   }
 

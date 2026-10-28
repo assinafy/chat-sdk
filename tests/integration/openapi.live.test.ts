@@ -46,7 +46,7 @@ describe("Assinafy production OpenAPI contract", () => {
     const documented = [...coverage.matchAll(/^\| (GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS) \| `([^`]+)` \|/gm)]
       .map((match) => `${match[1]} ${match[2]}`);
 
-    expect(published).toHaveLength(112);
+    expect(published).toHaveLength(118);
     expect(new Set(documented).size).toBe(documented.length);
     expect(documented.sort()).toEqual(published.sort());
 

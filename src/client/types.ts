@@ -54,6 +54,8 @@ export interface Account {
   notification_sender_type?: NotificationSenderType;
   roles?: string[];
   is_delete_allowed?: boolean;
+  /** Plan limits, returned by `accounts.get` only. */
+  limits?: { webhook_endpoints?: number; [key: string]: unknown };
   created_at: string;
 }
 
@@ -276,12 +278,17 @@ export interface NotificationPreferences {
   DocumentProcessingFailed: boolean;
   TemplateProcessingFailed: boolean;
   SignerWhatsappFailed: boolean;
+  /** Contract settings are optional for compatibility with older preference maps. */
+  ContractRenewalNotice?: boolean;
+  ContractExpiring?: boolean;
+  ContractExpired?: boolean;
+  ContractRenewed?: boolean;
 }
 
 /** Non-empty partial map accepted by `PUT /users/self/notification-preferences`. */
 export type UpdateNotificationPreferences = Partial<NotificationPreferences> &
   {
-    [K in keyof NotificationPreferences]: Pick<NotificationPreferences, K>;
+    [K in keyof NotificationPreferences]-?: Required<Pick<NotificationPreferences, K>>;
   }[keyof NotificationPreferences];
 
 // ---------------------------------------------------------------------------
@@ -308,6 +315,8 @@ export interface Signer {
   completed?: boolean | null;
   notification_history?: NotificationHistoryEntry[] | null;
   verification_method?: VerificationMethod | null;
+  /** Latest biometric verification state for an assignment signer. */
+  identity_verification_status?: IdentityVerificationStatus | null;
   notification_methods?: NotificationMethod[] | null;
   step?: number | null;
   notified?: boolean | null;
@@ -394,7 +403,7 @@ export interface CreateSignerInput {
   email?: string;
   /** Required for WhatsApp verification or notification. */
   whatsapp_phone_number?: string;
-  /** CPF/CNPJ for `DigitalCertificate`; a valid CPF for `IdDocumentFaceMatchBasic`. Normalized to digits. */
+  /** CPF/CNPJ for `DigitalCertificate`; a valid CPF for `IdDocumentFaceMatchBasic`. CNPJ may be alphanumeric. */
   government_id?: string;
 }
 
@@ -522,8 +531,8 @@ export interface AssignmentSummary {
 export interface Assignment {
   resource?: string;
   id: string;
-  document_id?: string;
-  sender_email?: string;
+  document_id?: string | null;
+  sender_email?: string | null;
   method: AssignmentMethod | null;
   status?: string;
   expiration?: string | null;
@@ -550,7 +559,13 @@ export interface Document {
   status: DocumentStatusCode;
   artifacts: DocumentArtifacts;
   is_closed: boolean;
+  /** Whether contract terms are tracked on this document. */
+  has_contract?: boolean;
   signing_url?: string | null;
+  /** Public certificate verification code; null before certification and on older documents. */
+  verification_code?: string | null;
+  /** Public verification page; null before certification. */
+  verification_url?: string | null;
   decline_reason?: string | null;
   declined_by?: Signer | string | null;
   tags?: Tag[];
@@ -617,6 +632,7 @@ export type ListSignerDocumentsQuery = ListDocumentsQuery;
 export interface SearchDocumentsQuery {
   search?: string;
   status?: DocumentStatusCode | DocumentStatusCode[];
+  sort?: string;
   page?: number;
   perPage?: number;
 }
@@ -758,24 +774,29 @@ interface TemplateSignerOptions {
   step?: number;
   verification_method?: VerificationMethod;
   notification_methods?: NotificationMethod[];
+  /** Used to find or create a signer when `id` is absent. */
+  email?: string;
+  /** Full name when the email creates a new signer. */
+  name?: string;
+  /** WhatsApp number when the email creates a new signer. */
+  whatsapp_phone_number?: string;
 }
 
 /**
  * Signer binding used when creating a document from a template:
- * `{ role_id, id, verification_method?, notification_methods?, step? }`.
+ * Bind a role to an existing `id`, or find/create a signer by `email`.
+ * `id` wins when both are provided.
  */
 export type TemplateSignerInput =
   | (TemplateSignerOptions & { role_id: string; id: string })
+  | (TemplateSignerOptions & { role_id: string; email: string; id?: string })
   | (TemplateSignerOptions & {
       /**
-       * @deprecated The operation binds existing signers by `role_id` + `id`;
-       * `full_name`, `email` and `whatsapp_phone_number` are not sent.
+       * @deprecated Use `name` for an email-created signer. `full_name` is not sent.
        */
       full_name: string;
       role_id?: string;
       id?: string;
-      email?: string;
-      whatsapp_phone_number?: string;
     });
 
 /** Signer pricing input for the template estimate endpoint. */
@@ -914,6 +935,10 @@ export interface EstimateAssignmentCostInput {
 
 /** Query accepted by the assignment list endpoint. */
 export interface ListAssignmentsQuery {
+  /** Required for API-key requests; OAuth selects its connected workspace. */
+  accountId?: string;
+  /** `created_at`, `expires_at` or `id`, optionally prefixed with `-`. */
+  sort?: string;
   page?: number;
   perPage?: number;
 }
@@ -925,17 +950,19 @@ export interface ResendNotificationResult {
   signer_id: string;
 }
 
-/** @deprecated Use {@link CostEstimate}. */
-export interface ResendCostEstimate {
+/** Resend price; legacy optional estimate fields remain available for existing callers. */
+export interface ResendCostEstimate extends Omit<CostEstimate, "credit_balance"> {
   total: number;
-  breakdown: Array<{ code: string; name: string; cost: number }>;
-  credit_balance: number;
+  breakdown: NonNullable<CostEstimate["breakdown"]>;
+  /** Null when the account's credits are not limited. */
+  credit_balance: number | null;
   has_sufficient_credits: boolean;
 }
 
 /** Rendered WhatsApp notification row. */
 export interface WhatsAppNotification {
-  sent_at: number;
+  /** ISO 8601 date-time; older deployments returned a Unix timestamp. */
+  sent_at: string | number;
   header: string;
   body: string;
   buttons: Array<{ text: string; url?: string }>;
@@ -1033,6 +1060,10 @@ export type WebhookEventType =
   | "signer_email_verified"
   | "signer_whatsapp_verified"
   | "signer_identity_verified"
+  | "signer_identity_verification_failed"
+  | "signer_identity_review_required"
+  | "signer_identity_review_approved"
+  | "signer_identity_review_rejected"
   | "signer_data_confirmed"
   | "signer_viewed_document"
   | "signer_signed_document"
@@ -1042,6 +1073,14 @@ export type WebhookEventType =
   | "template_created"
   | "template_processed"
   | "template_processing_failed"
+  | "document_contract_updated"
+  | "document_contract_amendment_updated"
+  | "document_contract_amended"
+  | "document_contract_renewal_notice"
+  | "document_contract_expiring"
+  | "document_contract_expired"
+  | "document_contract_renewed"
+  | "document_contract_terminated"
   | (string & {});
 
 /** `POST /accounts/{accountId}/webhooks/endpoints` request. */
@@ -1062,14 +1101,21 @@ export type UpdateWebhookEndpointInput = Partial<CreateWebhookEndpointInput>;
 
 /** A URL that receives the account's webhook events. */
 export interface WebhookEndpoint {
+  resource?: string;
   id: string;
   name: string | null;
   url: string;
   email: string;
   events: WebhookEventType[];
   is_active: boolean;
+  /** Deliveries are paused after consecutive failures. */
+  is_held?: boolean;
+  /** Unix timestamp when the pause began; null while deliveries run. */
+  held_since?: number | null;
   /** Whether deliveries carry a `webhook-signature` header. */
   signing_enabled: boolean;
+  /** Returned when create enables signing, or update turns it on. Store securely; OAuth cannot read it later. */
+  secret?: string;
   created_at: string;
   updated_at: string;
 }
@@ -1095,6 +1141,9 @@ export interface WebhookSubscriptionInput {
 export interface WebhookSubscription extends Omit<WebhookSubscriptionInput, "url" | "email"> {
   url: string | null;
   email: string | null;
+  is_held?: boolean;
+  /** Unix timestamp when deliveries were paused; null while they run. */
+  held_since?: number | null;
   id?: string;
   created_at?: string;
   updated_at?: string | null;
@@ -1104,6 +1153,24 @@ export interface WebhookSubscription extends Omit<WebhookSubscriptionInput, "url
 export interface WebhookEventTypeInfo {
   id: WebhookEventType;
   description: string;
+}
+
+/**
+ * Body of a webhook delivery. Verify the signature against the raw body before
+ * parsing. Timestamps here and inside subject/object are Unix seconds; the
+ * entities reflect their state at delivery time, not a frozen event snapshot.
+ */
+export interface WebhookEvent {
+  /** Activity ID; use the webhook-id header to deduplicate endpoint deliveries. */
+  id: number;
+  event: WebhookEventType;
+  message?: string | null;
+  payload?: Record<string, unknown> | null;
+  origin?: { ip?: string; "user-agent"?: string } | null;
+  created_at: number;
+  subject: Record<string, unknown>;
+  object: Record<string, unknown>;
+  account_id: string;
 }
 
 /** Webhook dispatch history row. */
@@ -1117,6 +1184,12 @@ export interface WebhookDispatch {
   endpoint_id?: string | null;
   payload: Record<string, unknown> | null;
   delivered: boolean;
+  /** Stable across attempts of the same event to the same endpoint. */
+  webhook_id?: string | null;
+  /** Attempt number, starting at 1. */
+  attempt?: number | null;
+  kind?: "scheduled" | "probe" | "manual" | (string & {});
+  will_retry?: boolean;
   http_status: number | null;
   response_body: string | null;
   error: string | null;
@@ -1261,4 +1334,144 @@ export interface OAuthUserInfo {
   email?: string | null;
   email_verified?: boolean | null;
   [key: string]: unknown;
+}
+
+// ---------------------------------------------------------------------------
+// Contract lifecycle management
+// ---------------------------------------------------------------------------
+
+/** Contract state, independent of the document's signing status. */
+export type ContractStatus = "draft" | "active" | "expired" | "terminated";
+
+/** How a signed instrument changes its root contract. */
+export type ContractRelationType = "amendment" | "renewal" | "termination";
+
+/** A contract's identifier in another system; at most 20 per contract. */
+export interface ContractExternalReference {
+  /** Up to 64 letters, digits, underscores, hyphens or periods; stored lowercase. */
+  system: string;
+  /** Up to 255 characters, excluding emoji and other four-byte characters. */
+  id: string;
+}
+
+/** Terms tracked on one workspace document; API dates remain strings. */
+export interface DocumentContract {
+  resource: "document_contract";
+  document_id: string;
+  status: ContractStatus;
+  counterparty_name: string | null;
+  /** CPF or CNPJ, digits only. */
+  counterparty_taxpayer_id: string | null;
+  value: number | null;
+  currency: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  auto_renew: boolean;
+  renewal_term_months: number | null;
+  notice_period_days: number | null;
+  /** Starts at 1 and advances on renewal or an end-date change. */
+  term: number;
+  owner_id: string | null;
+  metadata: Record<string, string> | null;
+  external_references: ContractExternalReference[];
+  /** Present when listing with `expand: "document"`. */
+  document?: Document;
+  /** Present on single-contract and related-family reads. */
+  amendments?: DocumentContractAmendment[];
+  created_at: string;
+  updated_at: string;
+}
+
+/** A linked instrument; its terms apply only after document certification. */
+export interface DocumentContractAmendment {
+  resource: "document_contract_amendment";
+  document_id: string;
+  document_name: string;
+  parent_document_id: string;
+  relation_type: ContractRelationType;
+  number: number | null;
+  status: "pending" | "applied";
+  document_status: DocumentStatusCode;
+  /** A blocked application is retried hourly in signing order. */
+  apply_error: string | null;
+  currency: string | null;
+  terms: Record<string, unknown> | null;
+  /** Preview while pending, immutable change record once applied. */
+  changes: Record<string, { from: unknown; to: unknown }> | null;
+  applied_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Partial terms update. Send at least one attribute. Null clears nullable
+ * fields; on a pending amendment it drops that field from the delta instead.
+ * The API returns all validation problems with stable field/error codes.
+ */
+export interface DocumentContractInput {
+  /** Closed states are accepted on creation; subsequent writes use draft/active. */
+  status?: ContractStatus;
+  /** At most 255 characters. */
+  counterparty_name?: string | null;
+  /** Valid CPF/CNPJ, formatted or unformatted. */
+  counterparty_taxpayer_id?: string | null;
+  /** 0–9999999999999.99, at most two decimal places. */
+  value?: number | null;
+  /** Three-letter currency code; defaults to BRL when a value is set. */
+  currency?: string | null;
+  /** YYYY-MM-DD, year 1000 or later. */
+  start_date?: string | null;
+  /** YYYY-MM-DD on or after start_date. Changing this advances term. */
+  end_date?: string | null;
+  auto_renew?: boolean;
+  /** 1–600 months; the server uses 12 when unset. */
+  renewal_term_months?: number | null;
+  /** 0–3650 days; null disables the renewal notice. */
+  notice_period_days?: number | null;
+  /** An active member of the workspace, or null. */
+  owner_id?: string | null;
+  /** Up to 50 keys (1–40 letters/digits/_.-), each containing up to 500 text characters. */
+  metadata?: Record<string, string> | null;
+  /** Replaces the whole list; [] or null clears it. */
+  external_references?: ContractExternalReference[] | null;
+  /** Link to any document in the root family; null unlinks a pending instrument. */
+  parent_document_id?: string | null;
+  /** Required on the first link; limits which terms the instrument may change. */
+  relation_type?: ContractRelationType;
+  /** Read timestamp precondition; a changed contract/link returns 409 ContractChanged. */
+  updated_at?: string;
+}
+
+/** Filters for contract listing; time windows use Brasília calendar days. */
+export interface ListContractsQuery {
+  status?: ContractStatus | ContractStatus[] | string;
+  counterparty?: string;
+  search?: string;
+  end_date_from?: string;
+  end_date_to?: string;
+  /** 0–3650, inclusive; 0 selects today. */
+  ending_within_days?: number;
+  external_system?: string;
+  external_id?: string;
+  sort?: "end_date" | "-end_date" | "updated_at" | "-updated_at";
+  expand?: "document";
+  page?: number;
+  perPage?: number;
+}
+
+/** Name the current term or the later end date to prevent duplicate renewal. */
+export type RenewContractInput = (
+  | { term: number; end_date?: string | null }
+  | { end_date: string; term?: number }
+) & {
+  /** Omit to preserve the amount; null clears it. */
+  value?: number | null;
+  updated_at?: string;
+};
+
+/** Optional termination reason and timestamp precondition. */
+export interface TerminateContractInput {
+  /** Up to 500 characters; HTML is stripped and the reason stays in the event. */
+  reason?: string | null;
+  updated_at?: string;
 }

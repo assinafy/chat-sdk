@@ -11,6 +11,7 @@
  */
 
 import type { Card, MessageBody } from "../cards/types.js";
+import { ConfigurationError } from "../client/errors.js";
 import {
   BaseAdapter,
   buildIncomingAction,
@@ -86,7 +87,7 @@ export class MemoryAdapter extends BaseAdapter {
 
   override async editMessage(threadId: string, messageId: string, message: OutgoingMessage): Promise<void> {
     const idx = this.outbox.findIndex((m) => m.id === messageId && m.threadId === threadId);
-    if (idx === -1) throw new Error(`memory adapter: cannot edit unknown message ${messageId}`);
+    if (idx === -1) throw new ConfigurationError(`memory adapter: cannot edit unknown message ${messageId}`);
     const target = this.outbox[idx]!;
     this.outbox[idx] = {
       ...target,

@@ -45,8 +45,9 @@ export class AccountsResource {
   }
 
   /** Create a new workspace account owned by the authenticated user. */
-  create(input: CreateAccountInput): Promise<Account> {
-    return this.http.post<Account>(paths.collection(), input);
+  async create(input: CreateAccountInput): Promise<Account> {
+    const { name, notification_sender_type } = input;
+    return this.http.post<Account>(paths.collection(), { name, notification_sender_type });
   }
 
   /** Fetch a single workspace account by id. */
@@ -55,8 +56,9 @@ export class AccountsResource {
   }
 
   /** Update a workspace account's profile. */
-  update(accountId: string, input: UpdateAccountInput): Promise<Account> {
-    return this.http.put<Account>(paths.item(accountId), input);
+  async update(accountId: string, input: UpdateAccountInput): Promise<Account> {
+    const { name, notification_sender_type } = input;
+    return this.http.put<Account>(paths.item(accountId), { name, notification_sender_type });
   }
 
   /**
@@ -80,8 +82,11 @@ export class AccountsResource {
   }
 
   /** Return monthly or daily document-funnel statistics for this account. */
-  getStats(accountId: string, query: DocumentStatsQuery = {}): Promise<DocumentStatsRow[]> {
-    return this.http.get<DocumentStatsRow[]>(withQuery(paths.stats(accountId), query));
+  async getStats(accountId: string, query: DocumentStatsQuery = {}): Promise<DocumentStatsRow[]> {
+    return this.http.get<DocumentStatsRow[]>(withQuery(paths.stats(accountId), {
+      granularity: query.granularity,
+      month: query.month,
+    }));
   }
 
   /** Download the account logo as an image `Response`. */

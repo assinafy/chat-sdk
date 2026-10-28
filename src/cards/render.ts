@@ -281,6 +281,8 @@ function escapeMarkdownLabel(value: string): string {
 
 function escapeMarkdownUrl(url: string): string {
   return sanitizeUrl(url)
+    // CommonMark decodes entities in destinations; preserve each literal ampersand.
+    .replace(/&/g, "&amp;")
     .replace(/[()[\]<>\\]/g, (character) =>
       `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
     )

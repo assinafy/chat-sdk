@@ -23,6 +23,7 @@
 import { AccountsResource } from "./accounts.js";
 import { AssignmentsResource } from "./assignments.js";
 import { AuthResource } from "./auth.js";
+import { ContractsResource } from "./contracts.js";
 import { DocumentsResource } from "./documents.js";
 import { FieldsResource } from "./fields.js";
 import { ConfigurationError } from "./errors.js";
@@ -41,6 +42,7 @@ export { HttpClient, withQuery } from "./http.js";
 export type { AuthStrategy, HttpClientOptions, ResponseWithMeta } from "./http.js";
 export { AccountsResource, type UploadAccountLogoInput } from "./accounts.js";
 export { AuthResource } from "./auth.js";
+export { ContractsResource } from "./contracts.js";
 export {
   OAuthResource,
   type AuthorizationCallbackParams,
@@ -108,6 +110,7 @@ export class AssinafyClient {
 
   readonly accounts: AccountsResource;
   readonly auth: AuthResource;
+  readonly contracts: ContractsResource;
   readonly oauth: OAuthResource;
   readonly signers: SignersResource;
   readonly documents: DocumentsResource;
@@ -132,6 +135,7 @@ export class AssinafyClient {
     this.accountId = accountId;
     this.accounts = new AccountsResource(this.http);
     this.auth = new AuthResource(this.http);
+    this.contracts = new ContractsResource(this.http);
     this.oauth = new OAuthResource(this.http);
     this.signers = new SignersResource(this.http);
     this.documents = new DocumentsResource(this.http);

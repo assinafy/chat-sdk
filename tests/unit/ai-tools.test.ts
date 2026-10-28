@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { createChatTools, runTool, toAiMessages, defaultSystemPrompt } from "../../src/ai/index.js";
 import type { AssinafyClient } from "../../src/client/index.js";
+import { ConfigurationError } from "../../src/client/errors.js";
 
 function fakeClient(): AssinafyClient {
   return {
@@ -241,6 +242,25 @@ describe("createChatTools", () => {
     expect(input).not.toHaveProperty("unexpected");
   });
 
+  it("accepts template signers by email and validates their contact fields", async () => {
+    const client = fakeClient();
+    const tools = createChatTools(client);
+    const signer = {
+      role_id: "r1",
+      email: "signer@example.test",
+      name: "Example Signer",
+      whatsapp_phone_number: "+5511999999999",
+    };
+    await runTool(tools, "instantiate_template", { templateId: "t1", signers: [signer] });
+    expect(client.templates.instantiate).toHaveBeenCalledWith("acct", "t1", expect.objectContaining({
+      signers: [signer],
+    }));
+    await expect(runTool(tools, "instantiate_template", {
+      templateId: "t1", signers: [{ ...signer, email: "invalid" }],
+    })).rejects.toThrow(/invalid email/);
+    expect(client.templates.instantiate).toHaveBeenCalledTimes(1);
+  });
+
   it("allowlists the webhook endpoint payload sent by the AI tool", async () => {
     const client = fakeClient();
     const tools = createChatTools(client);
@@ -254,16 +274,59 @@ describe("createChatTools", () => {
       .toEqual(["ep1", { is_active: false }]);
   });
 
+  it("withholds webhook signing secrets from tool results without changing the client response", async () => {
+    const client = fakeClient();
+    const expected = {
+      id: "ep1",
+      name: null,
+      url: "https://example.test/webhook",
+      email: "ops@example.test",
+      events: ["document_ready"],
+      is_active: true,
+      signing_enabled: true,
+      created_at: "2026-10-28T12:00:00Z",
+      updated_at: "2026-10-28T12:00:00Z",
+    };
+    const endpoint = { ...expected, secret: "whsec_example" };
+    vi.mocked(client.webhooks.createEndpoint).mockResolvedValue(endpoint);
+    vi.mocked(client.webhooks.updateEndpoint).mockResolvedValue(endpoint);
+    const tools = createChatTools(client);
+
+    await expect(runTool(tools, "create_webhook_endpoint", {
+      url: "https://example.test/webhook",
+      email: "ops@example.test",
+      events: ["document_ready"],
+      signing_enabled: true,
+    })).resolves.toEqual(expected);
+    await expect(runTool(tools, "update_webhook_endpoint", {
+      endpointId: "ep1", signing_enabled: true,
+    })).resolves.toEqual(expected);
+    expect(endpoint.secret).toBe("whsec_example");
+  });
+
   it("runTool rejects unknown tool names", async () => {
     const tools = createChatTools(fakeClient());
-    await expect(runTool(tools, "no_such_tool", {})).rejects.toThrow(/unknown tool/);
+    const result = runTool(tools, "no_such_tool", {});
+    await expect(result).rejects.toBeInstanceOf(ConfigurationError);
+    await expect(result).rejects.toThrow(/unknown tool/);
+  });
+
+  it("rejects an empty account id with ConfigurationError before calling the client", async () => {
+    const client = fakeClient();
+    const tools = createChatTools(client, { accountId: "" });
+    const result = runTool(tools, "list_signers", { accountId: "" });
+    await expect(result).rejects.toBeInstanceOf(ConfigurationError);
+    await expect(result).rejects.toThrow("accountId is required (no default configured)");
+    expect(client.signers.list).not.toHaveBeenCalled();
   });
 
   it("validates untrusted tool arguments before calling the client", async () => {
     const client = fakeClient();
     const tools = createChatTools(client);
 
-    await expect(runTool(tools, "create_signer", { email: "not-an-email" })).rejects.toThrow(
+    const invalidSigner = runTool(tools, "create_signer", { email: "not-an-email" });
+    await expect(invalidSigner).rejects.toBeInstanceOf(ConfigurationError);
+    await expect(invalidSigner).rejects.toThrow(
       /full_name.*required/,
     );
     await expect(runTool(tools, "list_signers", { perPage: 101 })).rejects.toThrow(/at most 100/);
@@ -276,7 +339,7 @@ describe("createChatTools", () => {
         templateId: "template",
         signers: [{ role_id: "role" }],
       }),
-    ).rejects.toThrow(/id.*required/);
+    ).rejects.toThrow(/arguments do not match any allowed shape/);
     expect(client.signers.create).not.toHaveBeenCalled();
   });
 

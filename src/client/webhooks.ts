@@ -43,19 +43,19 @@ const paths = {
 export class WebhooksResource {
   constructor(private readonly http: HttpClient) {}
 
-  /** List the account's webhook endpoints, oldest first. Scope `account:read`. */
-  listEndpoints(accountId: string): Promise<WebhookEndpoint[]> {
-    return this.http.get<WebhookEndpoint[]>(paths.endpoints(accountId));
+  /** List endpoints, oldest first, optionally filtered by exact URL. Scope `account:read`. */
+  async listEndpoints(accountId: string, query: { url?: string } = {}): Promise<WebhookEndpoint[]> {
+    return this.http.get<WebhookEndpoint[]>(withQuery(paths.endpoints(accountId), { url: query.url }));
   }
 
   /**
    * Register an endpoint. Past the plan's limit (1, or 3 on paid plans) the API
    * answers `403`; a `url` another endpoint already uses answers `400`. With
-   * `signing_enabled: true` a secret is generated — read it with
-   * {@link getEndpointSecret}. Scope `webhooks:write`.
+   * `signing_enabled: true` a secret is generated and returned as `secret`.
+   * Store it securely: OAuth cannot retrieve it later. Scope `webhooks:write`.
    */
-  createEndpoint(accountId: string, input: CreateWebhookEndpointInput): Promise<WebhookEndpoint> {
-    return this.http.post<WebhookEndpoint>(paths.endpoints(accountId), input);
+  async createEndpoint(accountId: string, input: CreateWebhookEndpointInput): Promise<WebhookEndpoint> {
+    return this.http.post<WebhookEndpoint>(paths.endpoints(accountId), endpointFields(input));
   }
 
   /** Get one endpoint. Scope `account:read`. */
@@ -65,15 +65,16 @@ export class WebhooksResource {
 
   /**
    * Change only the fields sent. Turning `signing_enabled` on keeps an
-   * existing secret or creates one; turning it off discards the secret.
+   * existing secret or creates one; turning it off discards the secret. A
+   * request that turns signing on returns `secret`; store it securely.
    * Scope `webhooks:write`.
    */
-  updateEndpoint(
+  async updateEndpoint(
     accountId: string,
     endpointId: string,
     input: UpdateWebhookEndpointInput,
   ): Promise<WebhookEndpoint> {
-    return this.http.put<WebhookEndpoint>(paths.endpoint(accountId, endpointId), input);
+    return this.http.put<WebhookEndpoint>(paths.endpoint(accountId, endpointId), endpointFields(input));
   }
 
   /** Delete an endpoint and free its slot. Scope `webhooks:write`. */
@@ -104,7 +105,7 @@ export class WebhooksResource {
   /**
    * Replace the signing secret. The old one stops working immediately, so
    * deploy the new secret to the receiver right away. `400` when signing is
-   * disabled. Not available to OAuth applications.
+   * disabled. Requires the `webhooks:write` OAuth scope when using OAuth.
    */
   rotateEndpointSecret(accountId: string, endpointId: string): Promise<WebhookEndpointSecret> {
     return this.http.post<WebhookEndpointSecret>(`${paths.endpoint(accountId, endpointId)}/secret/rotate`);
@@ -119,8 +120,9 @@ export class WebhooksResource {
   }
 
   /** Update the account's oldest webhook endpoint, creating it when none exists. */
-  updateSubscription(accountId: string, input: WebhookSubscriptionInput): Promise<WebhookSubscription> {
-    return this.http.put<WebhookSubscription>(paths.subscription(accountId), input);
+  async updateSubscription(accountId: string, input: WebhookSubscriptionInput): Promise<WebhookSubscription> {
+    const { events, is_active, url, email } = input;
+    return this.http.put<WebhookSubscription>(paths.subscription(accountId), { events, is_active, url, email });
   }
 
   /**
@@ -154,4 +156,9 @@ export class WebhooksResource {
   retryDispatch(accountId: string, dispatchId: string): Promise<WebhookDispatch> {
     return this.http.post<WebhookDispatch>(paths.retry(accountId, dispatchId));
   }
+}
+
+function endpointFields(input: UpdateWebhookEndpointInput): UpdateWebhookEndpointInput {
+  const { url, email, events, name, is_active, signing_enabled } = input;
+  return { url, email, events, name, is_active, signing_enabled };
 }

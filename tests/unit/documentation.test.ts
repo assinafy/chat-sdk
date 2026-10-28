@@ -5,6 +5,7 @@ const RESOURCE_NAMES = [
   "accounts",
   "assignments",
   "auth",
+  "contracts",
   "documents",
   "fields",
   "oauth",

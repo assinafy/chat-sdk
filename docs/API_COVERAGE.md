@@ -1,6 +1,6 @@
 # Assinafy v1 API operation index
 
-This index lists the 112 Assinafy v1 operations, their SDK methods, request and
+This index lists the 118 Assinafy v1 operations, their SDK methods, request and
 response documentation, and authentication mode. Paths include the `/v1`
 prefix; SDK resource methods use a `baseUrl` that already contains it.
 
@@ -29,6 +29,7 @@ Authentication labels:
 | Accounts | 10 |
 | Assignments | 10 |
 | Authentication | 15 |
+| Contracts | 6 |
 | Documents | 18 |
 | Fields | 8 |
 | OAuth | 4 |
@@ -38,7 +39,7 @@ Authentication labels:
 | Templates | 1 |
 | Users | 4 |
 | Webhooks | 14 |
-| **Total** | **112** |
+| **Total** | **118** |
 
 ## Operations
 
@@ -91,6 +92,17 @@ Authentication labels:
 | GET | `/v1/users/api-keys` | `client.auth.getApiKey` | [Request](API_REFERENCE.md#auth-get-api-key) | [Unwrapped response](API_REFERENCE.md#auth-get-api-key) | Bearer / API key |
 | POST | `/v1/users/api-keys` | `client.auth.createApiKey` | [Request](API_REFERENCE.md#auth-create-api-key) | [Unwrapped response](API_REFERENCE.md#auth-create-api-key) | Bearer / API key |
 | DELETE | `/v1/users/api-keys` | `client.auth.deleteApiKey` | [Request](API_REFERENCE.md#auth-delete-api-key) | [Unwrapped response](API_REFERENCE.md#auth-delete-api-key) | Bearer / API key |
+
+### Contracts
+
+| Method | Path | SDK method | Request | SDK response | Auth |
+| --- | --- | --- | --- | --- | --- |
+| GET | `/v1/accounts/{accountId}/contracts` | `client.contracts.list` | [Request](API_REFERENCE.md#contracts-list) | [Unwrapped response](API_REFERENCE.md#contract-list-response) | Bearer / API key |
+| GET | `/v1/accounts/{accountId}/documents/{documentId}/contract` | `client.contracts.get` | [Request](API_REFERENCE.md#contracts-get) | [Unwrapped response](API_REFERENCE.md#contract-response) | Bearer / API key |
+| PUT | `/v1/accounts/{accountId}/documents/{documentId}/contract` | `client.contracts.update` | [Request](API_REFERENCE.md#contracts-update) | [Unwrapped response](API_REFERENCE.md#contract-response) | Bearer / API key |
+| GET | `/v1/accounts/{accountId}/documents/{documentId}/contract/related` | `client.contracts.related` | [Request](API_REFERENCE.md#contracts-related) | [Unwrapped response](API_REFERENCE.md#contract-response) | Bearer / API key |
+| POST | `/v1/accounts/{accountId}/documents/{documentId}/contract/renew` | `client.contracts.renew` | [Request](API_REFERENCE.md#contracts-renew) | [Unwrapped response](API_REFERENCE.md#contract-renewal-response) | Bearer / API key |
+| POST | `/v1/accounts/{accountId}/documents/{documentId}/contract/terminate` | `client.contracts.terminate` | [Request](API_REFERENCE.md#contracts-terminate) | [Unwrapped response](API_REFERENCE.md#contract-termination-response) | Bearer / API key |
 
 ### Documents
 
@@ -212,7 +224,7 @@ it at the host root. The SDK derives that origin from the configured `baseUrl`.
 | PUT | `/v1/accounts/{accountId}/webhooks/endpoints/{endpointId}` | `client.webhooks.updateEndpoint` | [Request](API_REFERENCE.md#webhooks-update-endpoint) | [Unwrapped response](API_REFERENCE.md#webhooks-update-endpoint) | Bearer / API key |
 | DELETE | `/v1/accounts/{accountId}/webhooks/endpoints/{endpointId}` | `client.webhooks.deleteEndpoint` | [Request](API_REFERENCE.md#webhooks-delete-endpoint) | [Unwrapped response](API_REFERENCE.md#webhooks-delete-endpoint) | Bearer / API key |
 | GET | `/v1/accounts/{accountId}/webhooks/endpoints/{endpointId}/secret` | `client.webhooks.getEndpointSecret` | [Request](API_REFERENCE.md#webhooks-get-endpoint-secret) | [Unwrapped response](API_REFERENCE.md#webhooks-get-endpoint-secret) | Bearer / API key (not OAuth) |
-| POST | `/v1/accounts/{accountId}/webhooks/endpoints/{endpointId}/secret/rotate` | `client.webhooks.rotateEndpointSecret` | [Request](API_REFERENCE.md#webhooks-rotate-endpoint-secret) | [Unwrapped response](API_REFERENCE.md#webhooks-rotate-endpoint-secret) | Bearer / API key (not OAuth) |
+| POST | `/v1/accounts/{accountId}/webhooks/endpoints/{endpointId}/secret/rotate` | `client.webhooks.rotateEndpointSecret` | [Request](API_REFERENCE.md#webhooks-rotate-endpoint-secret) | [Unwrapped response](API_REFERENCE.md#webhooks-rotate-endpoint-secret) | Bearer / API key |
 | GET | `/v1/accounts/{accountId}/webhooks/subscriptions` | `client.webhooks.getSubscription` | [Request](API_REFERENCE.md#webhooks-get-subscription) | [Unwrapped response](API_REFERENCE.md#webhooks-get-subscription) | Bearer / API key |
 | PUT | `/v1/accounts/{accountId}/webhooks/subscriptions` | `client.webhooks.updateSubscription` | [Request](API_REFERENCE.md#webhooks-update-subscription) | [Unwrapped response](API_REFERENCE.md#webhooks-update-subscription) | Bearer / API key |
 | PUT | `/v1/accounts/{accountId}/webhooks/inactivate` | `client.webhooks.inactivate` | [Request](API_REFERENCE.md#webhooks-inactivate) | [Unwrapped response](API_REFERENCE.md#webhooks-inactivate) | Bearer / API key |

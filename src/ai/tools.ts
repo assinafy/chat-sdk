@@ -3,9 +3,9 @@
  *
  * `createChatTools(client)` returns an array of provider-agnostic tool
  * descriptors that expose the most common Assinafy operations as
- * JSON-schema-typed tools. The shape is compatible with both Anthropic's
- * Anthropic/OpenAI tool payloads after the small provider-specific reshape
- * shown in the package documentation.
+ * JSON-schema-typed tools. Convert descriptors to the provider's wire format
+ * before sending them; `execute` and the schema aliases are SDK conveniences.
+ * The AI bot example demonstrates this conversion.
  *
  * Each tool has:
  *  - `name`            — stable id you pass to the model
@@ -20,6 +20,7 @@
  */
 
 import type { AssinafyClient } from "../client/index.js";
+import { ConfigurationError } from "../client/errors.js";
 import type {
   AssignmentMethod,
   CreateWebhookEndpointInput,
@@ -37,6 +38,7 @@ import type {
   UpdateSignerInput,
   UpdateWebhookEndpointInput,
   ValidateFieldEntry,
+  WebhookEndpoint,
   WebhookSubscriptionInput,
 } from "../client/types.js";
 
@@ -66,8 +68,8 @@ export interface CreateChatToolsOptions {
 }
 
 /**
- * Build the full toolset for an Assinafy client. The resulting array can be
- * passed straight into Anthropic's `tools` (or after a small `{ name, description, parameters }` reshape into OpenAI's).
+ * Build the full toolset for an Assinafy client. Select the descriptor fields
+ * required by the model provider before sending its tool definitions.
  */
 export function createChatTools(
   client: AssinafyClient,
@@ -80,7 +82,7 @@ export function createChatTools(
   const accountIdRequired = !defaultAccountId;
   const accountIdOrDefault = (input?: string): string => {
     const value = input ?? defaultAccountId;
-    if (!value) throw new Error("accountId is required (no default configured)");
+    if (!value) throw new ConfigurationError("accountId is required (no default configured)");
     return value;
   };
   const entityIdSchema = (id: string) => ({
@@ -725,7 +727,9 @@ export function createChatTools(
         required: accountIdRequired ? ["accountId", "url", "email", "events"] : ["url", "email", "events"],
       },
       execute: async (args: CreateWebhookEndpointInput & { accountId?: string }) =>
-        client.webhooks.createEndpoint(accountIdOrDefault(args.accountId), webhookEndpointFields(args)),
+        webhookEndpointResult(await client.webhooks.createEndpoint(
+          accountIdOrDefault(args.accountId), webhookEndpointFields(args),
+        )),
     }),
 
     schemaTool({
@@ -738,11 +742,11 @@ export function createChatTools(
         required: accountIdRequired ? ["accountId", "endpointId"] : ["endpointId"],
       },
       execute: async (args: UpdateWebhookEndpointInput & { accountId?: string; endpointId: string }) =>
-        client.webhooks.updateEndpoint(
+        webhookEndpointResult(await client.webhooks.updateEndpoint(
           accountIdOrDefault(args.accountId),
           args.endpointId,
           webhookEndpointFields(args),
-        ),
+        )),
     }),
 
     schemaTool({
@@ -855,7 +859,7 @@ export async function runTool(
   args: unknown,
 ): Promise<unknown> {
   const tool = tools.find((t) => t.name === name);
-  if (!tool) throw new Error(`runTool: unknown tool "${name}"`);
+  if (!tool) throw new ConfigurationError(`runTool: unknown tool "${name}"`);
   return tool.execute(args);
 }
 
@@ -897,6 +901,12 @@ function webhookEndpointFields<T extends UpdateWebhookEndpointInput>(args: T): T
   return picked as T;
 }
 
+function webhookEndpointResult(endpoint: WebhookEndpoint): Omit<WebhookEndpoint, "secret"> {
+  // Signing secrets belong to the receiver, never the model's tool results.
+  const { secret: _secret, ...result } = endpoint;
+  return result;
+}
+
 const SIGNER_METHOD_PROPERTIES = {
   verification_method: { type: "string", enum: ["Email", "Whatsapp", "DigitalCertificate", "IdDocumentFaceMatchBasic"] },
   notification_methods: { type: "array", items: { type: "string", enum: ["Email", "Whatsapp"] } },
@@ -912,9 +922,13 @@ const TEMPLATE_SIGNER_SCHEMA = {
   type: "object",
   properties: {
     role_id: { type: "string" },
+    email: { type: "string", format: "email" },
+    name: { type: "string", description: "Full name when creating a signer from email." },
+    whatsapp_phone_number: { type: "string" },
     ...ASSIGNMENT_SIGNER_PROPERTIES,
   },
-  required: ["role_id", "id"],
+  required: ["role_id"],
+  anyOf: [{ required: ["id"] }, { required: ["email"] }],
 } as const;
 
 const ASSIGNMENT_SIGNER_SCHEMA = {
@@ -995,49 +1009,49 @@ function assertSchema(schema: Record<string, unknown>, value: unknown, path: str
         return false;
       }
     });
-    if (!matches) throw new TypeError(`${path}: arguments do not match any allowed shape`);
+    if (!matches) throw new ConfigurationError(`${path}: arguments do not match any allowed shape`);
   }
 
   const types = Array.isArray(schema.type) ? schema.type : schema.type ? [schema.type] : [];
   if (types.length && !types.some((type) => matchesType(type, value))) {
-    throw new TypeError(`${path}: expected ${types.join(" or ")}`);
+    throw new ConfigurationError(`${path}: expected ${types.join(" or ")}`);
   }
 
   if (Array.isArray(schema.enum) && !schema.enum.includes(value)) {
-    throw new TypeError(`${path}: expected one of ${schema.enum.join(", ")}`);
+    throw new ConfigurationError(`${path}: expected one of ${schema.enum.join(", ")}`);
   }
 
   if (typeof value === "number") {
     if (typeof schema.minimum === "number" && value < schema.minimum) {
-      throw new TypeError(`${path}: must be at least ${schema.minimum}`);
+      throw new ConfigurationError(`${path}: must be at least ${schema.minimum}`);
     }
     if (typeof schema.maximum === "number" && value > schema.maximum) {
-      throw new TypeError(`${path}: must be at most ${schema.maximum}`);
+      throw new ConfigurationError(`${path}: must be at most ${schema.maximum}`);
     }
   }
 
   if (typeof value === "string" && typeof schema.format === "string") {
     if (schema.format === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
-      throw new TypeError(`${path}: invalid email`);
+      throw new ConfigurationError(`${path}: invalid email`);
     }
     if (schema.format === "uri") {
       try {
         new URL(value);
       } catch {
-        throw new TypeError(`${path}: invalid URI`);
+        throw new ConfigurationError(`${path}: invalid URI`);
       }
     }
     if (schema.format === "date-time" && !Number.isFinite(Date.parse(value))) {
-      throw new TypeError(`${path}: invalid date-time`);
+      throw new ConfigurationError(`${path}: invalid date-time`);
     }
   }
 
   if (Array.isArray(value) && isRecord(schema.items)) {
     if (typeof schema.minItems === "number" && value.length < schema.minItems) {
-      throw new TypeError(`${path}: must contain at least ${schema.minItems} item(s)`);
+      throw new ConfigurationError(`${path}: must contain at least ${schema.minItems} item(s)`);
     }
     if (typeof schema.maxItems === "number" && value.length > schema.maxItems) {
-      throw new TypeError(`${path}: must contain at most ${schema.maxItems} item(s)`);
+      throw new ConfigurationError(`${path}: must contain at most ${schema.maxItems} item(s)`);
     }
     value.forEach((item, index) => assertSchema(schema.items as Record<string, unknown>, item, `${path}[${index}]`));
   }
@@ -1046,7 +1060,7 @@ function assertSchema(schema: Record<string, unknown>, value: unknown, path: str
     const required = Array.isArray(schema.required) ? schema.required : [];
     for (const key of required) {
       if (typeof key === "string" && (!(key in value) || value[key] === undefined)) {
-        throw new TypeError(`${path}.${key}: required`);
+        throw new ConfigurationError(`${path}.${key}: required`);
       }
     }
     if (isRecord(schema.properties)) {

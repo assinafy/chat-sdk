@@ -10,14 +10,14 @@ import { afterAll, describe, it, expect } from "vitest";
 import { createHmac } from "node:crypto";
 import { verifyStandardWebhook } from "../../src/adapters/webhook.js";
 import { ApiError, AssinafyClient, ConfigurationError } from "../../src/client/index.js";
-import { createSandboxFetch, loadEnv, makeMinimalPdf } from "../setup.js";
+import { createLiveFetch, loadEnv, makeMinimalPdf } from "../setup.js";
 
 const env = loadEnv();
 const describeLive = env ? describe : describe.skip;
 const itWithNotifications = env?.notificationsEnabled ? it : it.skip;
 
 describeLive("Assinafy API — live sandbox", () => {
-  const sandboxFetch = createSandboxFetch();
+  const sandboxFetch = createLiveFetch();
   const client = new AssinafyClient({
     apiKey: env?.apiKey,
     baseUrl: env?.baseUrl,
@@ -215,14 +215,13 @@ describeLive("Assinafy API — live sandbox", () => {
     const listed = await client.tags.list(env!.accountId, tagName);
     expect(listed.data.some((t) => t.id === tag.id)).toBe(true);
 
-    // The sandbox accepts tag names as well as IDs.
-    const setTags = await client.tags.setForDocument(env!.accountId, doc.id, [tagName]);
+    const setTags = await client.tags.setForDocument(env!.accountId, doc.id, [tag.id]);
     expect(setTags.some((t) => t.name === tagName)).toBe(true);
 
     const docTags = await client.tags.listForDocument(env!.accountId, doc.id);
     expect(docTags.some((t) => t.id === tag.id)).toBe(true);
 
-    const appended = await client.tags.addToDocument(env!.accountId, doc.id, [extraTag.name]);
+    const appended = await client.tags.addToDocument(env!.accountId, doc.id, [extraTag.id]);
     expect(appended.some((t) => t.id === extraTag.id)).toBe(true);
 
     await client.tags.removeFromDocument(env!.accountId, doc.id, tag.id);
@@ -395,7 +394,7 @@ describeLive("Assinafy API — live sandbox", () => {
     }
     expect(await client.webhooks.listEndpoints(account.id)).toEqual([]);
     const replacement = await client.webhooks.createEndpoint(account.id, {
-      url: "https://example.test/webhooks/assinafy", email: "webhooks@example.test",
+      url: "https://example.com/webhooks/assinafy", email: "webhooks@example.test",
       events: ["document_ready"], is_active: false,
     });
     await client.webhooks.deleteEndpoint(account.id, replacement.id);
@@ -423,14 +422,9 @@ describeLive("Assinafy API — live sandbox", () => {
     expect(typeof updated.DocumentCompleted).toBe("boolean");
   });
 
-  it("assignments.list either returns the documented page or the known sandbox context error", async () => {
-    try {
-      const assignments = await client.assignments.list({ perPage: 1 });
-      expect(Array.isArray(assignments.data)).toBe(true);
-    } catch (error) {
-      expect(error).toBeInstanceOf(ApiError);
-      expect((error as ApiError).status).toBe(400);
-    }
+  it("assignments.list selects the workspace explicitly for API-key requests", async () => {
+    const assignments = await client.assignments.list({ accountId: env!.accountId, sort: "-created_at", perPage: 1 });
+    expect(Array.isArray(assignments.data)).toBe(true);
   });
 
   it("documents.search returns a compact page and rename updates the name", async () => {

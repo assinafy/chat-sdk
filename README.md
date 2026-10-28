@@ -23,10 +23,10 @@ de chat, cards e IA. Cada seção assume a anterior.
 
 O SDK é um pacote com duas metades que podem ser usadas de forma independente.
 
-**O cliente da API** cobre a API REST Assinafy v1: **112 operações em 85
-caminhos**, agrupadas em doze recursos — contas, autenticação, OAuth, usuários,
+**O cliente da API** cobre a API REST Assinafy v1: **118 operações em 90
+caminhos**, agrupadas em treze recursos — contas, autenticação, OAuth, usuários,
 signatários, documentos, tags, templates, assignments, campos, o fluxo de
-assinatura do signatário e webhooks. Toda operação é tipada, e o transporte
+assinatura do signatário, contratos e webhooks. Toda operação é tipada, e o transporte
 cuida da autenticação, do envelope de resposta, da paginação, dos metadados de
 rate limit, dos retries e do mapeamento de erros.
 
@@ -44,7 +44,7 @@ Dois documentos de referência acompanham este e vão mais fundo:
   modo de autenticação, payloads completos de requisição e resposta, as
   superfícies de chat, card, adapter e estado, e o catálogo completo de
   ferramentas de IA.
-- **[Índice de operações](./docs/API_COVERAGE.md)** — as 112 operações publicadas
+- **[Índice de operações](./docs/API_COVERAGE.md)** — as 118 operações publicadas
   mapeadas ao método do SDK, mais os pontos em que a superfície HTTP do SDK vai
   além do documento publicado.
 
@@ -55,9 +55,9 @@ O contrato upstream com autoridade é a
 
 ## 2. Requisitos e escopo de runtime
 
-Aplicações de servidor e os exemplos deste repositório têm como alvo o
-**Node.js 24 LTS**, que é o que o campo `engines` do pacote exige e o que a CI
-roda. A API só aceita HTTPS com TLS 1.2 ou superior, o padrão de todos os
+Aplicações de servidor exigem **Node.js 24 ou superior**. Desenvolvimento e
+releases usam **Node.js 26.13.0 LTS**; a CI verifica Node 24 e Node 26. A API só aceita HTTPS com TLS 1.2 ou superior,
+o padrão de todos os
 runtimes listados abaixo.
 
 Nem todo ponto de entrada precisa de Node. O pacote publica subcaminhos
@@ -66,12 +66,12 @@ REST:
 
 | Import | Conteúdo | Roda em |
 | --- | --- | --- |
-| `@assinafy/chat-sdk/client` | Cliente REST Assinafy v1 e OAuth | Node 24, Bun, Deno e browsers com as APIs Fetch padrão |
+| `@assinafy/chat-sdk/client` | Cliente REST Assinafy v1 e OAuth | Node 24+, Bun, Deno e browsers com as APIs Fetch padrão |
 | `@assinafy/chat-sdk/cards` | Tipos, builders e renderizadores de card | Qualquer runtime JavaScript |
 | `@assinafy/chat-sdk/state` | Contrato de estado e implementação em memória | Qualquer runtime JavaScript |
 | `@assinafy/chat-sdk/ai` | Descritores de ferramenta e helpers de mensagem | Qualquer runtime JavaScript |
 | `@assinafy/chat-sdk/adapters` | Contratos de adapter, adapter em memória, verificação HMAC | Node.js — a verificação de webhook importa `node:crypto` |
-| `@assinafy/chat-sdk` | Tudo acima | Node.js, porque a raiz reexporta os helpers de webhook |
+| `@assinafy/chat-sdk` | Cliente, chat, cards, adapters e estado | Node.js, porque a raiz reexporta os helpers de webhook |
 
 A regra prática: se um bundle só conversa com a API, importe
 `@assinafy/chat-sdk/client` e nada mais. Tanto ES modules quanto CommonJS são
@@ -709,13 +709,17 @@ signatários, e instanciar um deles vincula um signatário concreto a cada papel
 ```ts
 const { data: templates } = await client.templates.list(accountId, { perPage: 10 });
 const template = await client.templates.get(accountId, templates[0]!.id);
-const papeis = template.roles!.filter((papel) => papel.assignment_type !== "Editor");
+const papeis = template.roles!.filter((papel) => papel.assignment_type === "Signer");
 
 const criado = await client.templates.instantiate(accountId, template.id, {
   name: "nda-acme.pdf",
   signers: papeis.map((papel) => ({ role_id: papel.id, id: signatario.id })),
 });
 ```
+
+Vincule todo papel `Signer`; `CopyReceiver` é opcional e os valores obrigatórios
+de edição vão em `editor_fields`. O vínculo pode usar `email`, com `name` e
+`whatsapp_phone_number` opcionais, em vez de um `id` de signatário existente.
 
 `client.templates.estimateCost()` precifica uma instanciação do mesmo modo que
 `assignments.estimateCost()` precifica um assignment direto.
@@ -735,6 +739,68 @@ await client.tags.removeFromDocument(accountId, documento.id, tag.id); // remove
 `documents.list()` aceita um filtro `tags` e devolve apenas documentos que
 carregam **todas** as tags listadas.
 
+### Gestão do ciclo de vida de contratos (CLM)
+
+O acompanhamento do contrato pertence a um documento e não muda seu fluxo de
+assinatura. Faça o upload e cadastre os termos separadamente. Escritas exigem
+a funcionalidade no plano e OAuth `documents:write`; leituras usam
+`documents:read` e continuam disponíveis quando o plano expira.
+
+```ts
+const contrato = await client.contracts.update(accountId, documento.id, {
+  status: "active",
+  counterparty_name: "Organização Exemplo",
+  value: 12000,
+  currency: "BRL",
+  start_date: "2026-11-01",
+  end_date: "2027-10-31",
+  auto_renew: false,
+  renewal_term_months: 12,
+  notice_period_days: 30,
+  external_references: [{ system: "crm", id: "registro-123" }],
+});
+
+const pagina = await client.contracts.list(accountId, {
+  status: "active", ending_within_days: 45, expand: "document", perPage: 20,
+});
+const atual = await client.contracts.get(accountId, documento.id);
+if (atual.resource === "document_contract") {
+  const renovado = await client.contracts.renew(accountId, documento.id, {
+    term: atual.term,
+    updated_at: atual.updated_at,
+  });
+  await client.contracts.terminate(accountId, documento.id, {
+    reason: "Contrato encerrado",
+    updated_at: renovado.updated_at,
+  });
+}
+```
+
+Envie o `updated_at` lido ao escrever para rejeitar alterações concorrentes com
+`409 ContractChanged`. A renovação exige o `term` atual ou um `end_date` posterior,
+impedindo que uma repetição renove duas vezes. O transporte não repete essas
+escritas. Encerrar o contrato não cancela o documento de assinatura. Campos
+omitidos mantêm seus valores; campos anuláveis podem ser limpos, e
+`external_references` substitui a lista inteira.
+
+Para registrar uma mudança por instrumento assinado, envie outro documento e
+chame `contracts.update` no id dele com `{ parent_document_id: documento.id,
+relation_type: "amendment", value: 14000 }`. Use `renewal` ou `termination` para
+esses instrumentos. A mudança só se aplica após a certificação, na ordem das
+assinaturas. Vínculos pendentes podem ser alterados ou removidos com
+`parent_document_id: null`; os já aplicados são somente leitura.
+`contracts.related` lê o contrato raiz e seus instrumentos a partir de qualquer
+documento da família.
+
+O processamento horário usa o calendário de Brasília: avisos de renovação e
+vencimento, renovação automática ou expiração. Os e-mails seguem as preferências
+do responsável: `ContractRenewalNotice`, `ContractExpiring`, `ContractExpired` e
+`ContractRenewed`. A perda do plano pausa o processamento; a reativação retoma o
+ciclo sem enviar avisos cuja janela já passou. Consuma os webhooks de contrato,
+leia `documents.activities` e reconcilie eventos perdidos paginando
+`contracts.list` por `-updated_at`. Todos os campos e ambas as respostas estão
+na [referência de contratos](./docs/API_REFERENCE.md#contract-payloads).
+
 ### Webhooks substituem o polling
 
 Uma conta tem 1 endpoint de webhook, ou até 3 nos planos pagos. Cada endpoint
@@ -749,7 +815,7 @@ const endpoint = await client.webhooks.createEndpoint(accountId, {
   events: ["document_ready", "signer_signed_document", "document_processing_failed"],
   signing_enabled: true,
 });
-const { secret } = await client.webhooks.getEndpointSecret(accountId, endpoint.id); // "whsec_…"
+const secret = endpoint.secret!; // "whsec_…"
 ```
 
 Passar do limite do plano responde `403`; repetir a `url` de outro endpoint da
@@ -757,9 +823,10 @@ conta responde `400`. `listEndpoints`, `getEndpoint`, `updateEndpoint` (envia
 só os campos informados) e `deleteEndpoint` completam o ciclo.
 `deleteEndpointByUrl(accountId, url)` remove pelo endereço exato cadastrado.
 No sandbox, essa operação retorna `404`; use a exclusão por ID nesse ambiente.
-`rotateEndpointSecret` troca o segredo e o antigo para de valer na hora. Os dois
-métodos de segredo exigem chave de API ou token de usuário — aplicações OAuth
-não os acessam. `updateSubscription`, `getSubscription` e `inactivate` continuam
+`rotateEndpointSecret` troca o segredo e o antigo para de valer na hora; OAuth
+pode rotacioná-lo com `webhooks:write`. Guarde o segredo retornado uma vez ao
+criar, ativar ou rotacionar. `getEndpointSecret` lê o segredo existente apenas
+com chave de API ou token de usuário. `updateSubscription`, `getSubscription` e `inactivate` continuam
 funcionando e agem sobre o endpoint **mais antigo** da conta.
 
 `client.webhooks.listEventTypes()` enumera todo evento suportado com sua
@@ -1096,7 +1163,7 @@ de entrada e confere que as exportações batem:
 npm run verify
 ```
 
-A suíte ao vivo é separada porque conversa com a rede. Ela tem duas metades: a
+A suíte ao vivo é separada porque conversa com a rede. Por padrão ela executa a
 suíte de sandbox, que precisa de credenciais e se pula sozinha sem elas, e uma
 suíte de contrato sem credenciais, que lê o documento OpenAPI de produção e os
 endpoints públicos de descoberta OAuth.
@@ -1120,6 +1187,26 @@ Assinafy enviar notificações reais: instanciação de template e o ciclo de co
 | `ASSINAFY_TEST_NOTIFICATIONS` | `0` | Defina `1` apenas para uma execução que pode enviar notificações no sandbox |
 | `ASSINAFY_TEST_EMAIL_PRIMARY` | nenhum | Primeiro destinatário; obrigatório só quando as notificações estão habilitadas |
 | `ASSINAFY_TEST_EMAIL_SECONDARY` | nenhum | Segundo destinatário; mesma condição |
+
+Uma suíte separada de produção exige `ASSINAFY_TEST_PRODUCTION=1` e as variáveis
+`ASSINAFY_PRODUCTION_API_KEY` e `ASSINAFY_PRODUCTION_ACCOUNT_ID` no `.env`.
+O host dessa suíte é fixo em produção; a proteção da suíte de sandbox permanece.
+
+```bash
+ASSINAFY_TEST_PRODUCTION=1 npm exec -- vitest run tests/integration/production.live.test.ts
+```
+
+Essa suíte cria documentos em rascunho, termos contratuais, signatários, campos
+e tags descartáveis e os remove na ordem inversa. Ela faz rescisão dos
+contratos, estima os quatro métodos de assinatura e lê configurações
+existentes de usuário/conta e templates. Não envia convites de assinatura ou OTPs,
+nem realiza captura biométrica ou assinatura com certificado. Configurações e
+webhooks existentes não são alterados. Restrições de plano e rotas indisponíveis
+falham as verificações positivas; a ausência de template é indicada como uma
+verificação de detalhe pulada.
+A renovação manual é um teste separado, pulado sem
+`ASSINAFY_TEST_NOTIFICATIONS=1` porque pode enviar e-mail ao responsável.
+Os recursos criados também podem gerar entregas nos webhooks já configurados.
 
 Testes unitários e a verificação de tipos dos exemplos não precisam de rede nem
 de credenciais.

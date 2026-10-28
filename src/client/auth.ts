@@ -37,26 +37,30 @@ export class AuthResource {
    * {@link MfaChallenge} when the user has two-factor authentication — check
    * `"mfa_token" in result` and finish with {@link verifyMfa}.
    */
-  login(input: LoginInput): Promise<LoginResponse | MfaChallenge> {
-    return this.http.post<LoginResponse | MfaChallenge>("/login", input);
+  async login(input: LoginInput): Promise<LoginResponse | MfaChallenge> {
+    const { email, password } = input;
+    return this.http.post<LoginResponse | MfaChallenge>("/login", { email, password });
   }
 
   /**
    * Complete a two-factor login with an authenticator or recovery code. The
    * challenge is single-use and expires five minutes after login.
    */
-  verifyMfa(input: VerifyMfaInput): Promise<LoginResponse> {
-    return this.http.post<LoginResponse>("/authentication/mfa/verify", input);
+  async verifyMfa(input: VerifyMfaInput): Promise<LoginResponse> {
+    const { mfa_token, code } = input;
+    return this.http.post<LoginResponse>("/authentication/mfa/verify", { mfa_token, code });
   }
 
   /** Sign in or register with a Google identity token. */
-  socialLogin(input: SocialLoginInput): Promise<LoginResponse> {
-    return this.http.post<LoginResponse>("/authentication/social-login", input);
+  async socialLogin(input: SocialLoginInput): Promise<LoginResponse> {
+    const { provider, token, has_accepted_terms } = input;
+    return this.http.post<LoginResponse>("/authentication/social-login", { provider, token, has_accepted_terms });
   }
 
   /** Link a social-login provider account to the authenticated user. */
   async linkSocialLogin(input: LinkSocialLoginInput): Promise<void> {
-    await this.http.post<unknown>("/auth/link-social-login", input);
+    const { provider, token } = input;
+    await this.http.post<unknown>("/auth/link-social-login", { provider, token });
   }
 
   /**
@@ -94,18 +98,21 @@ export class AuthResource {
   }
 
   /** Change the current user's password. */
-  changePassword(input: ChangePasswordInput): Promise<EmailResult> {
-    return this.http.put<EmailResult>("/authentication/change-password", input);
+  async changePassword(input: ChangePasswordInput): Promise<EmailResult> {
+    const { email, password, new_password } = input;
+    return this.http.put<EmailResult>("/authentication/change-password", { email, password, new_password });
   }
 
   /** Trigger a password-reset email. */
-  requestPasswordReset(input: RequestPasswordResetInput): Promise<EmailResult> {
-    return this.http.put<EmailResult>("/authentication/request-password-reset", input);
+  async requestPasswordReset(input: RequestPasswordResetInput): Promise<EmailResult> {
+    const { email } = input;
+    return this.http.put<EmailResult>("/authentication/request-password-reset", { email });
   }
 
   /** Complete a password reset using the token from the reset email. */
-  resetPassword(input: ResetPasswordInput): Promise<EmailResult> {
-    return this.http.put<EmailResult>("/authentication/reset-password", input);
+  async resetPassword(input: ResetPasswordInput): Promise<EmailResult> {
+    const { email, token, new_password } = input;
+    return this.http.put<EmailResult>("/authentication/reset-password", { email, token, new_password });
   }
 
   /** `GET /users/self/mfa` — enrolled two-factor methods and unused recovery-code count. */
@@ -126,13 +133,15 @@ export class AuthResource {
    * recovery codes (shown once). Replacing a confirmed method also requires
    * `password` or `reauth_code`.
    */
-  confirmTotp(input: ConfirmTotpInput): Promise<RecoveryCodes> {
-    return this.http.put<RecoveryCodes>("/users/self/mfa/totp/confirm", input);
+  async confirmTotp(input: ConfirmTotpInput): Promise<RecoveryCodes> {
+    const { id, code, password, reauth_code } = input;
+    return this.http.put<RecoveryCodes>("/users/self/mfa/totp/confirm", { id, code, password, reauth_code });
   }
 
   /** `POST /users/self/mfa/recovery-codes` — issue ten new codes, invalidating the old set. */
-  regenerateRecoveryCodes(proof: MfaReauthInput): Promise<RecoveryCodes> {
-    return this.http.post<RecoveryCodes>("/users/self/mfa/recovery-codes", proof);
+  async regenerateRecoveryCodes(proof: MfaReauthInput): Promise<RecoveryCodes> {
+    const { password, code } = proof;
+    return this.http.post<RecoveryCodes>("/users/self/mfa/recovery-codes", { password, code });
   }
 
   /**
@@ -140,9 +149,10 @@ export class AuthResource {
    * one also discards the recovery codes.
    */
   async deleteMfaMethod(methodId: string, proof: MfaReauthInput): Promise<{ is_mfa_enabled: boolean }> {
+    const { password, code } = proof;
     const res = await this.http.request<{ is_mfa_enabled: boolean }>(
       `/users/self/mfa/${encodeURIComponent(methodId)}`,
-      { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify(proof) },
+      { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ password, code }) },
     );
     return res.data;
   }

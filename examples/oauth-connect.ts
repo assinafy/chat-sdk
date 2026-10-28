@@ -65,7 +65,13 @@ const pending = new Map<string, OAuthAuthorizationRequest>();
  * it, and `"disconnecting"` from the moment a disconnect starts.
  */
 let connection:
-  | { tokens: OAuthTokenResponse; accountId?: string; blocked?: "unusable" | "disconnecting" }
+  | {
+      tokens: OAuthTokenResponse;
+      accountId?: string;
+      blocked?: "unusable" | "disconnecting";
+      /** Concurrent refreshes share one request; replicas need a shared-storage lock. */
+      refreshing?: Promise<OAuthTokenResponse>;
+    }
   | undefined;
 
 function send(response: ServerResponse, status: number, body: string): void {
@@ -116,7 +122,7 @@ async function callback(url: URL, response: ServerResponse): Promise<void> {
 
   // The token covers exactly one workspace. Ask which, and store its id
   // alongside the tokens — every other workspace answers 403.
-  const connected = new AssinafyClient({ accessToken: tokens.access_token });
+  const connected = new AssinafyClient({ baseUrl: client.http.baseUrl, accessToken: tokens.access_token });
   const [account] = await connected.accounts.list();
   connection = { tokens, accountId: account?.id };
 
@@ -139,18 +145,11 @@ async function listDocuments(response: ServerResponse): Promise<void> {
     send(response, 400, "<p>Not connected.</p>");
     return;
   }
-  const connected = new AssinafyClient({ accessToken: connection.tokens.access_token });
+  const connected = new AssinafyClient({ baseUrl: client.http.baseUrl, accessToken: connection.tokens.access_token });
   const page = await connected.documents.list(connection.accountId, { perPage: 10 });
   const rows = page.data.map((document) => Text(`${document.name} — ${document.status}`));
   send(response, 200, renderHtml(Card({ children: rows.length ? rows : [Text("No documents yet.")] })));
 }
-
-/**
- * The refresh in flight. Concurrent requests share it, so the same refresh
- * token is never sent twice. This only covers one process: an application
- * running several replicas needs a per-connection lock in shared storage.
- */
-let refreshing: Promise<OAuthTokenResponse> | undefined;
 
 /**
  * Whether a refresh failed before its request left this process: rejected
@@ -171,36 +170,37 @@ function failedBeforeSending(error: unknown): boolean {
  * the server leaves the connection unusable — the user reconnects.
  */
 async function refresh(response: ServerResponse): Promise<void> {
-  if (connection?.blocked) {
+  const current = connection;
+  if (current?.blocked) {
     send(response, 409, `<p>This connection can no longer be refreshed. <a href="/connect">Connect again</a></p>`);
     return;
   }
-  const refreshToken = connection?.tokens.refresh_token;
-  if (!refreshToken) {
+  const refreshToken = current?.tokens.refresh_token;
+  if (!current || !refreshToken) {
     send(response, 400, "<p>No refresh token — was `offline_access` granted?</p>");
     return;
   }
-  refreshing ??= client.oauth
+  current.refreshing ??= client.oauth
     .refreshToken({ refreshToken, clientId, clientSecret })
     .then(
       (tokens) => {
-        connection = { ...connection!, tokens }; // persist before any use
+        current.tokens = tokens; // persist before any use, even if another connection replaced it
         return tokens;
       },
       (error: unknown) => {
         // `invalid_grant` means the connection is gone; a timeout or a 5xx
         // means it may be. Never send this token again — unless storage has
         // already moved on to a newer one, the user has to reconnect.
-        if (!failedBeforeSending(error) && connection?.tokens.refresh_token === refreshToken) {
-          connection.blocked ??= "unusable";
+        if (!failedBeforeSending(error) && current.tokens.refresh_token === refreshToken) {
+          current.blocked ??= "unusable";
         }
         throw error;
       },
     )
     .finally(() => {
-      refreshing = undefined;
+      current.refreshing = undefined;
     });
-  const tokens = await refreshing;
+  const tokens = await current.refreshing;
   send(response, 200, renderHtml(Card({ children: [Text(`Renewed. Expires in ${tokens.expires_in}s.`)] })));
 }
 
@@ -211,15 +211,16 @@ async function refresh(response: ServerResponse): Promise<void> {
  * revocation keeps the connection blocked, so the disconnect can be retried.
  */
 async function disconnect(response: ServerResponse): Promise<void> {
-  if (connection) connection.blocked = "disconnecting";
-  await refreshing?.catch(() => undefined);
-  const refreshToken = connection?.tokens.refresh_token;
-  const token = refreshToken ?? connection?.tokens.access_token;
+  const current = connection;
+  if (current) current.blocked = "disconnecting";
+  await current?.refreshing?.catch(() => undefined);
+  const refreshToken = current?.tokens.refresh_token;
+  const token = refreshToken ?? current?.tokens.access_token;
   if (token) {
     const tokenTypeHint = refreshToken ? "refresh_token" : "access_token";
     await client.oauth.revokeToken({ token, tokenTypeHint, clientId, clientSecret });
   }
-  connection = undefined;
+  if (connection === current) connection = undefined;
   send(response, 200, "<p>Disconnected.</p>");
 }
 

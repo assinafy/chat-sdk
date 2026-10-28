@@ -75,7 +75,7 @@ export class DocumentsResource {
 
   /**
    * `GET /accounts/{accountId}/documents/search` — query `search`, `status`,
-   * `page`, `per-page`. Returns a compact document representation
+   * `sort`, `page`, `per-page`. Returns a compact document representation
    * (no expanded assignment/pages) — cheaper than {@link list} when you only
    * need to resolve names/ids.
    */
@@ -84,6 +84,7 @@ export class DocumentsResource {
       withQuery(paths.search(accountId), {
         search: query.search,
         status: csv(query.status),
+        sort: query.sort,
         ...pageQuery(query.page, query.perPage),
       }),
     );
@@ -171,11 +172,11 @@ export class DocumentsResource {
   }
 
   /**
-   * `GET /documents/{documentId}/activities` — the activity log:
+   * `GET /documents/{documentId}/activities` — the activity log, optionally sorted:
    * `[{ id, event, message, payload, origin, created_at }]` (`origin` holds the request IP).
    */
-  activities(documentId: string): Promise<DocumentActivity[]> {
-    return this.http.get<DocumentActivity[]>(paths.activities(documentId));
+  async activities(documentId: string, query: { sort?: string } = {}): Promise<DocumentActivity[]> {
+    return this.http.get<DocumentActivity[]>(withQuery(paths.activities(documentId), { sort: query.sort }));
   }
 
   /**

@@ -69,9 +69,12 @@ export class TemplatesResource {
    * `POST /accounts/{accountId}/templates/{templateId}/documents` — create a
    * document from a template.
    *
-   * Request sent: `{ signers: [{ role_id, id, verification_method?,
+   * Request sent: `{ signers: [{ role_id, id?, email?, name?, whatsapp_phone_number?, verification_method?,
    * notification_methods?, step? }], editor_fields?: [{ field_id, value }],
-   * name?, message?, expires_at?, tags? }`. Bind every non-Editor role. A
+   * name?, message?, expires_at?, tags? }`. Bind every Signer role; CopyReceiver
+   * bindings are optional and Editor roles use only `editor_fields`. Send a
+   * signer `id` or `email`; `id` wins when both are supplied. Email reuses an
+   * account signer or creates one using `name` and `whatsapp_phone_number`. A
    * keyed `editor_fields` object (deprecated) is sent as the array form.
    * Response: the new {@link Document}.
    */
@@ -82,9 +85,12 @@ export class TemplatesResource {
   ): Promise<Document> {
     const { signers, editor_fields, name, message, expires_at, tags } = input;
     return this.http.post<Document>(paths.instantiate(accountId, templateId), {
-      signers: signers.map(({ role_id, id, verification_method, notification_methods, step }) => ({
+      signers: signers.map(({ role_id, id, email, name, whatsapp_phone_number, verification_method, notification_methods, step }) => ({
         role_id,
         id,
+        email,
+        name,
+        whatsapp_phone_number,
         verification_method,
         notification_methods,
         step,

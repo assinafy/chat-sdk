@@ -140,6 +140,23 @@ describe("renderers", () => {
     expect(markdown).toContain("https://safe.example/%29%20%5BClick%5D%28javascript:alert%281");
   });
 
+  it.each([
+    ["javascript&#58;alert(1)", "javascript&amp;#58;alert%281%29"],
+    ["javascript&#x3a;alert(1)", "javascript&amp;#x3a;alert%281%29"],
+    ["javascript&colon;alert(1)", "javascript&amp;colon;alert%281%29"],
+    ["&#106;avascript:alert(1)", "&amp;#106;avascript:alert%281%29"],
+    ["https://example.test/?a=1&b=2", "https://example.test/?a=1&amp;b=2"],
+  ])("preserves literal ampersands in Markdown URLs: %s", (url, escaped) => {
+    const markdown = renderMarkdown(Card({ children: [
+      LinkButton({ label: "Open", url }),
+      Image({ alt: "Preview", url }),
+      DocumentPreview({ documentId: "d1", name: "Document", status: "ready", signingUrl: url }),
+    ] }));
+    expect(markdown).toContain(`[Open](${escaped})`);
+    expect(markdown).toContain(`![Preview](${escaped})`);
+    expect(markdown).toContain(`[Open document](${escaped})`);
+  });
+
   it("keeps safe http/https/mailto URLs intact", () => {
     const safe = Card({
       children: [Actions([LinkButton({ label: "mail", url: "mailto:a@example.test" })])],

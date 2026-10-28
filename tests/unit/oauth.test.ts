@@ -233,6 +233,8 @@ describe("readAuthorizationCallback", () => {
 
   it.each([
     ["a bare query string", `code=abc&state=s-1234567890&${iss}`],
+    ["a bare query with an unescaped issuer", `code=abc&state=s-1234567890&iss=${ISSUER}`],
+    ["a prefixed query with an unescaped issuer", `?code=abc&state=s-1234567890&iss=${ISSUER}`],
     ["URLSearchParams", new URLSearchParams(`code=abc&state=s-1234567890&${iss}`)],
     ["a URL object", new URL(`${REDIRECT}?code=abc&state=s-1234567890&${iss}`)],
     ["an Express query object", { code: "abc", state: "s-1234567890", iss: ISSUER }],
@@ -254,6 +256,17 @@ describe("readAuthorizationCallback", () => {
       expect(error).toBeInstanceOf(OAuthError);
       expect(error).toMatchObject({ error: "access_denied", errorDescription: "User declined" });
     }
+  });
+
+  it("parses an error query containing unescaped URLs", () => {
+    const { client } = clientWith({});
+    expect(() => client.oauth.readAuthorizationCallback(
+      `error=access_denied&error_description=See https://example.test/help&state=s-1234567890&iss=${ISSUER}`,
+      expected,
+    )).toThrow(expect.objectContaining({
+      error: "access_denied",
+      errorDescription: "See https://example.test/help",
+    }));
   });
 
   it.each([

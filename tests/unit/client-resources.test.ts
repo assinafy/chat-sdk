@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import { AssinafyClient, ConfigurationError } from "../../src/client/index.js";
+import { describe, expect, expectTypeOf, it, vi } from "vitest";
+import { AssinafyClient, ConfigurationError, type NotificationPreferences, type UpdateNotificationPreferences } from "../../src/client/index.js";
 
 interface RecordedRequest {
   url: string;
@@ -41,6 +41,44 @@ function makeClient(responses: unknown[] = [], accessToken?: string): { client: 
   });
   return { client, requests };
 }
+
+it("limits authentication and user settings to declared request fields", async () => {
+  const { client, requests } = makeClient();
+  const login = { email: "user@example.com", password: "password", ignored: true };
+  const mfa = { mfa_token: "challenge", code: "123456", ignored: true };
+  const social = { provider: "google", token: "identity", has_accepted_terms: true, ignored: true };
+  const password = { ...login, new_password: "new-password", token: "reset-token" };
+  const totp = { id: "method", code: "123456", password: "password", reauth_code: "234567", ignored: true };
+  const proof = { password: "password", code: "123456", ignored: true };
+  const preferences = { DocumentCompleted: false, ContractRenewed: true, ignored: true };
+  await client.auth.login(login);
+  await client.auth.verifyMfa(mfa);
+  await client.auth.socialLogin(social);
+  await client.auth.linkSocialLogin(social);
+  await client.auth.changePassword(password);
+  await client.auth.requestPasswordReset(login);
+  await client.auth.resetPassword(password);
+  await client.auth.confirmTotp(totp);
+  await client.auth.regenerateRecoveryCodes(proof);
+  await client.auth.deleteMfaMethod("method", proof);
+  await client.users.updateNotificationPreferences(preferences);
+  expect(requests.map(({ body }) => body)).toEqual([
+    { email: login.email, password: login.password },
+    { mfa_token: mfa.mfa_token, code: mfa.code },
+    { provider: social.provider, token: social.token, has_accepted_terms: true },
+    { provider: social.provider, token: social.token },
+    { email: login.email, password: login.password, new_password: password.new_password },
+    { email: login.email },
+    { email: login.email, token: password.token, new_password: password.new_password },
+    { id: totp.id, code: totp.code, password: totp.password, reauth_code: totp.reauth_code },
+    { password: proof.password, code: proof.code },
+    { password: proof.password, code: proof.code },
+    { DocumentCompleted: false, ContractRenewed: true },
+  ]);
+  const query = { granularity: "daily" as const, month: "2026-10", ignored: true };
+  await client.users.getStats(query);
+  expect(Object.fromEntries(new URL(requests.at(-1)!.url).searchParams)).toEqual({ granularity: "daily", month: "2026-10" });
+});
 
 describe("AssinafyClient resource paths", () => {
   it("forwards every transport option to the HttpClient and keeps credentials out of it", async () => {
@@ -255,6 +293,77 @@ describe("AssinafyClient resource paths", () => {
     ]);
   });
 
+  it("allowlists collect placements while preserving the estimate's free-form entries", async () => {
+    const { client, requests } = makeClient([{}, {}]);
+    const entries = [{
+      page_id: "p", private: "not-sent",
+      fields: [{
+        signer_id: "s", field_id: "f", private: "not-sent",
+        display_settings: { left: 1, top: 2, width: 3, height: 4, fontSize: 5, backgroundColor: "#ffffff", private: "not-sent" },
+      }],
+    }];
+    await client.assignments.create("d", { method: "collect", signers: [{ id: "s" }], entries });
+    await client.assignments.estimateCost("d", { method: "collect", entries });
+    expect(requests[0]!.body).toEqual({
+      method: "collect", signers: [{ id: "s" }], entries: [{
+        page_id: "p", fields: [{
+          signer_id: "s", field_id: "f",
+          display_settings: { left: 1, top: 2, width: 3, height: 4, fontSize: 5, backgroundColor: "#ffffff" },
+        }],
+      }],
+    });
+    expect(requests[1]!.body).toEqual({ method: "collect", entries });
+  });
+
+  it("forwards only declared account, signer, tag and webhook body fields", async () => {
+    const { client, requests } = makeClient();
+    const extra = { private: "not-sent" };
+    const account = { name: "Workspace", notification_sender_type: "Account", ...extra };
+    const signer = { full_name: "Signer", email: "signer@example.com", whatsapp_phone_number: "+5511999990000", government_id: "123", ...extra };
+    const tag = { name: "Tag", color: null, ...extra };
+    const endpoint = {
+      url: "https://example.com/webhook", email: "ops@example.com", events: ["document_ready"],
+      name: "Receiver", is_active: false, signing_enabled: true, ...extra,
+    };
+    await client.accounts.create(account);
+    await client.accounts.update("acct", account);
+    await client.signers.create("acct", signer);
+    await client.signers.update("acct", "s", signer);
+    await client.tags.create("acct", tag);
+    await client.tags.update("acct", "t", tag);
+    await client.webhooks.createEndpoint("acct", endpoint);
+    await client.webhooks.updateEndpoint("acct", "ep", endpoint);
+    await client.webhooks.updateSubscription("acct", endpoint);
+    expect(requests.map((request) => request.body)).toEqual([
+      { name: "Workspace", notification_sender_type: "Account" },
+      { name: "Workspace", notification_sender_type: "Account" },
+      { full_name: "Signer", email: "signer@example.com", whatsapp_phone_number: "+5511999990000", government_id: "123" },
+      { full_name: "Signer", email: "signer@example.com", whatsapp_phone_number: "+5511999990000", government_id: "123" },
+      { name: "Tag", color: null }, { name: "Tag", color: null },
+      { url: endpoint.url, email: endpoint.email, events: endpoint.events, name: "Receiver", is_active: false, signing_enabled: true },
+      { url: endpoint.url, email: endpoint.email, events: endpoint.events, name: "Receiver", is_active: false, signing_enabled: true },
+      { url: endpoint.url, email: endpoint.email, events: endpoint.events, is_active: false },
+    ]);
+    await client.accounts.getStats("acct", { granularity: "daily", month: "2026-10", ...extra });
+    expect(new URL(requests[9]!.url).searchParams.has("private")).toBe(false);
+  });
+
+  it("allowlists field and signing entries without changing free-form values or nulls", async () => {
+    const { client, requests } = makeClient([[], {}]);
+    const value = { private: "declared value data", nested: null };
+    await client.fields.validateMultiple("acct", [
+      { field_id: "f", value, private: "not-sent" },
+      { field_id: "g", value: null, private: "not-sent" },
+    ] as never);
+    await client.assignments.sign("d", "a", "code", [
+      { itemId: "i", fieldId: "f", pageId: "p", value: "signed", private: "not-sent" },
+    ] as never);
+    expect(requests.map((request) => request.body)).toEqual([
+      [{ field_id: "f", value }, { field_id: "g", value: null }],
+      [{ itemId: "i", fieldId: "f", pageId: "p", value: "signed" }],
+    ]);
+  });
+
   it("rejects field and template preparation errors through promises", async () => {
     const { client, requests } = makeClient();
     const calls = [
@@ -262,6 +371,10 @@ describe("AssinafyClient resource paths", () => {
       () => client.fields.update("acct", "f", null as never),
       () => client.templates.instantiate("acct", "t", { signers: null } as never),
       () => client.templates.estimateCost("acct", "t", { signers: null } as never),
+      () => client.accounts.create(null as never),
+      () => client.signers.create("acct", null as never),
+      () => client.tags.create("acct", null as never),
+      () => client.webhooks.createEndpoint("acct", null as never),
     ];
     for (const call of calls) await expect(call()).rejects.toBeInstanceOf(TypeError);
     expect(requests).toHaveLength(0);
@@ -316,6 +429,23 @@ describe("AssinafyClient resource paths", () => {
     expect(new URL(requests[1]!.url).searchParams.get("sort")).toBe("-updated_at");
   });
 
+  it("preserves resend pricing and ISO WhatsApp notification timestamps", async () => {
+    const estimate = { total: 0.45, breakdown: [], credit_balance: null, has_sufficient_credits: true };
+    const notification = {
+      sent_at: "2026-10-28T12:00:00Z", header: "Signature request", body: "Please sign",
+      buttons: [{ text: "Open", url: "https://example.test/sign?code=test-code" }],
+      phone_number: "+5511999990000", signer_id: "s1",
+    };
+    const { client } = makeClient([estimate, [notification]]);
+    const cost = await client.assignments.estimateResendCost("d", "a", "s1");
+    expect(cost).toEqual(estimate);
+    expect(cost.has_sufficient_credits).toBe(true);
+    expect(cost.credit_balance).toBeNull();
+    const notifications = await client.assignments.whatsappNotifications("d", "a");
+    expect(notifications[0]?.sent_at).toBe(notification.sent_at);
+    expect(notifications[0]?.buttons[0]?.url).toBe(notification.buttons[0]!.url);
+  });
+
   it("covers template get, instantiate, and estimate-cost paths", async () => {
     const { client, requests } = makeClient([{}, {}, {}]);
 
@@ -339,14 +469,18 @@ describe("AssinafyClient resource paths", () => {
 
     await client.templates.instantiate("acct", "tpl", {
       signers: [
-        { role_id: "r1", id: "s1", step: 2, email: "signer@example.com", full_name: "Legacy" } as never,
+        { role_id: "r1", id: "s1", step: 1, email: "signer@example.com", full_name: "Legacy" } as never,
+        { role_id: "r2", step: 2, email: "new@example.com", name: "New Signer", whatsapp_phone_number: "+5511999990000" },
       ],
       editor_fields: { f1: "value", f2: 42 },
       name: "Contract",
     });
 
     expect(requests[0]!.body).toEqual({
-      signers: [{ role_id: "r1", id: "s1", step: 2 }],
+      signers: [
+        { role_id: "r1", id: "s1", step: 1, email: "signer@example.com" },
+        { role_id: "r2", step: 2, email: "new@example.com", name: "New Signer", whatsapp_phone_number: "+5511999990000" },
+      ],
       editor_fields: [
         { field_id: "f1", value: "value" },
         { field_id: "f2", value: "42" },
@@ -456,6 +590,28 @@ describe("AssinafyClient resource paths", () => {
     expect(requests[1]!.body).toEqual(input);
     expect(requests[3]!.body).toEqual({ is_active: false });
     expect(new URL(requests[7]!.url).searchParams.get("endpoint_id")).toBe("ep 1");
+  });
+
+  it("filters webhook endpoints by exact URL and preserves generated secrets for OAuth receivers", async () => {
+    const endpoint = { id: "ep", signing_enabled: true, secret: "whsec_test", is_held: false, held_since: null };
+    const { client, requests } = makeClient([[], endpoint, endpoint, { secret: "whsec_rotated" }], "workspace-token");
+    const url = "https://example.com/webhook?tenant=a+b&key=value";
+    await client.webhooks.listEndpoints("account /", { url });
+    const created = await client.webhooks.createEndpoint("acct", {
+      url, email: "ops@example.com", events: ["document_ready"], signing_enabled: true,
+    });
+    const updated = await client.webhooks.updateEndpoint("acct", "ep", { signing_enabled: true });
+    const rotated = await client.webhooks.rotateEndpointSecret("acct", "ep");
+    expect(new URL(requests[0]!.url).pathname).toBe("/v1/accounts/account%20%2F/webhooks/endpoints");
+    expect(new URL(requests[0]!.url).searchParams.get("url")).toBe(url);
+    expect(created.secret).toBe(endpoint.secret);
+    expect(updated.secret).toBe(endpoint.secret);
+    expect(created.is_held).toBe(false);
+    expect(created.held_since).toBeNull();
+    expect(rotated.secret).toBe("whsec_rotated");
+    for (const request of requests) {
+      expect(new Headers(request.init.headers).get("authorization")).toBe("Bearer workspace-token");
+    }
   });
 
   it("covers two-factor login and enrollment paths", async () => {
@@ -788,13 +944,14 @@ describe("AssinafyClient resource paths", () => {
   it("covers document search and rename", async () => {
     const { client, requests } = makeClient([[], {}]);
 
-    await client.documents.search("acct", { search: "contract", status: "metadata_ready", perPage: 5 });
+    await client.documents.search("acct", { search: "contract", status: "metadata_ready", sort: "-updated_at", perPage: 5 });
     await client.documents.rename("doc 1", "New Name.pdf");
 
     expect(requests[0]!.method).toBe("GET");
     expect(new URL(requests[0]!.url).pathname).toBe("/v1/accounts/acct/documents/search");
     expect(new URL(requests[0]!.url).searchParams.get("search")).toBe("contract");
     expect(new URL(requests[0]!.url).searchParams.get("status")).toBe("metadata_ready");
+    expect(new URL(requests[0]!.url).searchParams.get("sort")).toBe("-updated_at");
     expect(new URL(requests[0]!.url).searchParams.get("per-page")).toBe("5");
     expect(requests[1]!.method).toBe("PATCH");
     expect(new URL(requests[1]!.url).pathname).toBe("/v1/documents/doc%201");
@@ -869,15 +1026,46 @@ describe("AssinafyClient resource paths", () => {
     expect(requests[3]!.body).toEqual({ DocumentCompleted: false });
   });
 
+  it("preserves contract notification settings and accepts single-setting updates", async () => {
+    const legacy: NotificationPreferences = {
+      DocumentCompleted: true,
+      SignerDeclined: true,
+      DocumentCancelled: true,
+      DocumentAboutToExpire: true,
+      DocumentExpired: true,
+      DocumentExpirationReset: true,
+      DocumentProcessingFailed: true,
+      TemplateProcessingFailed: true,
+      SignerWhatsappFailed: true,
+    };
+    const preferences = {
+      ...legacy,
+      ContractRenewalNotice: true,
+      ContractExpiring: true,
+      ContractExpired: true,
+      ContractRenewed: false,
+    };
+    const { client, requests } = makeClient([preferences, preferences]);
+
+    await expect(client.users.getNotificationPreferences()).resolves.toEqual(preferences);
+    await expect(client.users.updateNotificationPreferences({ ContractRenewed: false }))
+      .resolves.toEqual(preferences);
+    expect(requests[1]!.body).toEqual({ ContractRenewed: false });
+    expectTypeOf({}).not.toMatchTypeOf<UpdateNotificationPreferences>();
+    expectTypeOf<{ ContractRenewed: undefined }>().not.toMatchTypeOf<UpdateNotificationPreferences>();
+  });
+
   it("covers assignments.list and auth.linkSocialLogin", async () => {
     const { client, requests } = makeClient([[], {}]);
 
-    await client.assignments.list({ perPage: 10 });
+    await client.assignments.list({ accountId: "account +/", sort: "-created_at", perPage: 10 });
     await client.auth.linkSocialLogin({ provider: "google", token: "tok" });
 
     expect(requests[0]!.method).toBe("GET");
     expect(new URL(requests[0]!.url).pathname).toBe("/v1/assignments");
     expect(new URL(requests[0]!.url).searchParams.get("per-page")).toBe("10");
+    expect(new URL(requests[0]!.url).searchParams.get("accountId")).toBe("account +/");
+    expect(new URL(requests[0]!.url).searchParams.get("sort")).toBe("-created_at");
     expect(requests[1]!.method).toBe("POST");
     expect(new URL(requests[1]!.url).pathname).toBe("/v1/auth/link-social-login");
     expect(requests[1]!.body).toEqual({ provider: "google", token: "tok" });
@@ -940,7 +1128,7 @@ describe("AssinafyClient resource paths", () => {
     await client.documents.download("doc 1", "original");
     await client.documents.thumbnail("doc 1");
     await client.documents.downloadPage("doc 1", "page 1");
-    await client.documents.activities("doc 1");
+    await client.documents.activities("doc 1", { sort: "-created_at" });
     await client.documents.verify("signature hash");
     await client.documents.publicGet("doc 1");
     await client.documents.sendPublicToken("doc 1", { channel: "email", recipient: "signer@example.com" });
@@ -964,6 +1152,7 @@ describe("AssinafyClient resource paths", () => {
     expect(form).toBeInstanceOf(FormData);
     // The upload operation takes a single `file` part; the deprecated tags are not sent.
     expect([...form.keys()]).toEqual(["file"]);
+    expect(new URL(requests[5]!.url).searchParams.get("sort")).toBe("-created_at");
   });
 
   it("honors upload MIME overrides and rejects files over 25 MB before transport", async () => {

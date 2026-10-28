@@ -6,10 +6,13 @@ import { URL } from "node:url";
 const entries = ["index", "client/index", "cards/index", "adapters/index", "state/index", "ai/index"];
 const require = createRequire(import.meta.url);
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+const modules = { esm: {}, cjs: {} };
 
 for (const entry of entries) {
   const esm = await import(new URL(`../dist/${entry}.js`, import.meta.url));
   const cjs = require(`../dist/${entry}.cjs`);
+  modules.esm[entry] = esm;
+  modules.cjs[entry] = cjs;
   assert.ok(Object.keys(esm).length, `${entry} ESM exports are empty`);
   assert.deepEqual(Object.keys(cjs).sort(), Object.keys(esm).sort(), `${entry} CJS/ESM exports differ`);
 
@@ -21,8 +24,21 @@ for (const entry of entries) {
   assert.equal(exported.require.default, `./dist/${entry}.cjs`);
 }
 
+for (const format of ["esm", "cjs"]) {
+  const root = modules[format].index;
+  const client = modules[format]["client/index"];
+  const ai = modules[format]["ai/index"];
+  const adapters = modules[format]["adapters/index"];
+  assert.equal(root.ConfigurationError, client.ConfigurationError, `${format} entry points duplicate errors`);
+  await assert.rejects(ai.runTool([], "missing", {}), root.ConfigurationError);
+  const adapter = new adapters.MemoryAdapter();
+  await assert.rejects(adapter.editMessage("thread", "missing", "text"), client.ConfigurationError);
+  assert.throws(() => adapters.verifyStandardWebhook({ secret: "" }), root.WebhookSignatureError);
+}
+
 const { AssinafyClient } = await import(new URL("../dist/client/index.js", import.meta.url));
 const client = new AssinafyClient({ baseUrl: "https://example.com/v1" });
+assert.ok(client.contracts, "ContractsResource is missing from the built client");
 assert.ok(client.users, "UsersResource is missing from the built client");
 
 // The SDK version reaches the User-Agent two ways: tsup's build-time `define`

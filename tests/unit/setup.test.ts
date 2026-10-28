@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createSandboxFetch, loadEnv } from "../setup.js";
+import { createLiveFetch, loadEnv } from "../setup.js";
 
 const originalBaseUrl = process.env.ASSINAFY_BASE_URL;
 
@@ -16,18 +16,18 @@ describe("live test configuration", () => {
     expect(() => loadEnv()).toThrow("Live tests require ASSINAFY_BASE_URL");
   });
 
-  it("spaces concurrent live requests without changing their bodies or retrying them", async () => {
+  it.each([650, 2_000])("spaces concurrent live requests by %i ms without mutation retries", async (intervalMs) => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
     const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 503 }));
     vi.stubGlobal("fetch", fetchImpl);
-    const paced = createSandboxFetch();
+    const paced = createLiveFetch(intervalMs);
     const init = { method: "POST", body: "request-body" };
     const first = paced("https://example.test/first", init);
     const second = paced("https://example.test/second", init);
     await vi.advanceTimersByTimeAsync(0);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(649);
+    await vi.advanceTimersByTimeAsync(intervalMs - 1);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1);
     expect(fetchImpl).toHaveBeenCalledTimes(2);

@@ -110,7 +110,9 @@ export class FieldsResource {
     options: WorkspaceOnlyOptions = {},
   ): Promise<FieldValidationResult[]> {
     rejectAccessCode(options);
-    return this.http.post<FieldValidationResult[]>(paths.validateMultiple(accountId), entries);
+    return this.http.post<FieldValidationResult[]>(
+      paths.validateMultiple(accountId), entries.map(({ field_id, value }) => ({ field_id, value })),
+    );
   }
 
   /** `GET /field-types` — supported field types: `[{ type, name }]`. */

@@ -17,7 +17,8 @@ export default defineConfig({
   },
   format: ["esm", "cjs"],
   dts: true,
-  splitting: false,
+  // Share error constructors across package entry points so instanceof works.
+  splitting: true,
   sourcemap: true,
   clean: true,
   treeshake: true,

@@ -23,11 +23,12 @@ export class UsersResource {
    * `GET /users/self/stats` — return zero-filled document KPIs across every
    * account. Omit the query for 12 monthly rows; daily requires `month`.
    */
-  getStats(query: DocumentStatsQuery = {}): Promise<DocumentStatsRow[]> {
-    return this.http.get<DocumentStatsRow[]>(withQuery("/users/self/stats", query));
+  async getStats(query: DocumentStatsQuery = {}): Promise<DocumentStatsRow[]> {
+    const { granularity, month } = query;
+    return this.http.get<DocumentStatsRow[]>(withQuery("/users/self/stats", { granularity, month }));
   }
 
-  /** `GET /users/self/notification-preferences` — return all nine boolean settings. */
+  /** `GET /users/self/notification-preferences` — return all thirteen boolean settings. */
   getNotificationPreferences(): Promise<NotificationPreferences> {
     return this.http.get<NotificationPreferences>("/users/self/notification-preferences");
   }
@@ -36,12 +37,20 @@ export class UsersResource {
    * `PUT /users/self/notification-preferences` — merge one or more settings;
    * omitted keys retain their current value. Returns the complete updated map.
    */
-  updateNotificationPreferences(
+  async updateNotificationPreferences(
     preferences: UpdateNotificationPreferences,
   ): Promise<NotificationPreferences> {
-    return this.http.put<NotificationPreferences>(
-      "/users/self/notification-preferences",
-      preferences,
-    );
+    const {
+      DocumentCompleted, SignerDeclined, DocumentCancelled, DocumentAboutToExpire,
+      DocumentExpired, DocumentExpirationReset, DocumentProcessingFailed,
+      TemplateProcessingFailed, SignerWhatsappFailed, ContractRenewalNotice,
+      ContractExpiring, ContractExpired, ContractRenewed,
+    } = preferences;
+    return this.http.put<NotificationPreferences>("/users/self/notification-preferences", {
+      DocumentCompleted, SignerDeclined, DocumentCancelled, DocumentAboutToExpire,
+      DocumentExpired, DocumentExpirationReset, DocumentProcessingFailed,
+      TemplateProcessingFailed, SignerWhatsappFailed, ContractRenewalNotice,
+      ContractExpiring, ContractExpired, ContractRenewed,
+    });
   }
 }

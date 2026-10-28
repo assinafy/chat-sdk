@@ -76,6 +76,7 @@ export {
   type ResponseWithMeta,
   AccountsResource,
   AuthResource,
+  ContractsResource,
   OAuthResource,
   type AuthorizationCallbackParams,
   type CreateAuthorizationUrlOptions,

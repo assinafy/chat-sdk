@@ -17,7 +17,10 @@ permissions:
 
 jobs:
   unit:
-    name: Unit (Node 24)
+    name: Unit (Node ${{ matrix.node }})
+    strategy:
+      matrix:
+        node: [24.22.2, 26.13.0]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -26,10 +29,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Use Node.js 24
+      - name: Use Node.js ${{ matrix.node }}
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version-file: .nvmrc
+          node-version: ${{ matrix.node }}
           cache: npm
 
       - name: Install dependencies

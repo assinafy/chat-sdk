@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { createMemoryAdapter, MemoryAdapter, BaseAdapter } from "../../src/adapters/index.js";
-import { NotImplementedError } from "../../src/client/errors.js";
+import { ConfigurationError, NotImplementedError } from "../../src/client/errors.js";
 
 describe("createMemoryAdapter (factory)", () => {
   let adapter: MemoryAdapter;
@@ -62,9 +62,9 @@ describe("createMemoryAdapter (factory)", () => {
 
   it("does not edit or delete a message through the wrong thread", async () => {
     const sent = await adapter.postMessage("right-thread", { text: "original" });
-    await expect(
-      adapter.editMessage("wrong-thread", sent.id, { text: "changed" }),
-    ).rejects.toThrow("unknown message");
+    const editing = adapter.editMessage("wrong-thread", sent.id, { text: "changed" });
+    await expect(editing).rejects.toBeInstanceOf(ConfigurationError);
+    await expect(editing).rejects.toThrow("unknown message");
     await adapter.deleteMessage("wrong-thread", sent.id);
     expect(adapter.outbox).toMatchObject([{ threadId: "right-thread", text: "original" }]);
   });

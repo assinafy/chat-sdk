@@ -3,7 +3,7 @@
 This is the reference for the public surface of `@assinafy/chat-sdk`.
 The REST contracts follow the official OpenAPI document at
 [`https://api.assinafy.com.br/v1/docs/openapi.json`](https://api.assinafy.com.br/v1/docs/openapi.json)
-and the complete 112-operation REST inventory is in the
+and the complete 118-operation REST inventory is in the
 [API operation index](./API_COVERAGE.md).
 
 The client exposes the API operations plus pagination helpers, deprecated
@@ -12,7 +12,8 @@ below with its request and return type.
 
 ## Runtime and imports
 
-Use Node.js 24 LTS for server applications and the examples in this repository.
+Use Node.js 26 LTS for server applications and the examples in this repository.
+Node.js 24 remains supported and is also verified in CI.
 The focused client entry point is also suitable for modern browser runtimes that
 provide `fetch`, `Blob`, `FormData`, `Headers`, `Response`, and `URLSearchParams`:
 
@@ -279,6 +280,20 @@ it back, not only its `state`. `refreshToken` raises `OAuthError`
 | <a id="signers-remove"></a>`signers.remove(accountId, signerId)` | `DELETE /accounts/{accountId}/signers/{signerId}` | account | path/query only | [`void`](#unwrapped-json-pagination-raw-responses-and-void) |
 | <a id="signers-confirm-data-for-document"></a>`signers.confirmDataForDocument(documentId, accessCode, input)` | `PUT /documents/{documentId}/signers/confirm-data` | signer code | [`SignerSelfConfirmDataInput`](#confirm-signer-data-request) | [`Signer`](#signer-response) |
 
+### Contracts
+
+Contract state is independent of document signing. Reads need OAuth
+`documents:read`; writes need `documents:write` and contract tracking on the plan.
+
+| SDK method | HTTP operation | Auth | Request | Unwrapped SDK response |
+| --- | --- | --- | --- | --- |
+| <a id="contracts-list"></a>`contracts.list(accountId, query?)` | `GET /accounts/{accountId}/contracts` | account | [Contract list query](#contract-list-query) | [`Page<DocumentContract>`](#contract-list-response) |
+| <a id="contracts-get"></a>`contracts.get(accountId, documentId)` | `GET /accounts/{accountId}/documents/{documentId}/contract` | account | path/query only | [`DocumentContract \| DocumentContractAmendment`](#contract-response) |
+| <a id="contracts-update"></a>`contracts.update(accountId, documentId, input)` | `PUT /accounts/{accountId}/documents/{documentId}/contract` | account | [Contract update request](#contract-update-request) | [`DocumentContract \| DocumentContractAmendment`](#contract-response) |
+| <a id="contracts-related"></a>`contracts.related(accountId, documentId)` | `GET /accounts/{accountId}/documents/{documentId}/contract/related` | account | path/query only | [`DocumentContract`](#contract-response) |
+| <a id="contracts-renew"></a>`contracts.renew(accountId, documentId, input)` | `POST /accounts/{accountId}/documents/{documentId}/contract/renew` | account | [Contract renewal request](#contract-renewal-request) | [`DocumentContract`](#contract-renewal-response) |
+| <a id="contracts-terminate"></a>`contracts.terminate(accountId, documentId, input?)` | `POST /accounts/{accountId}/documents/{documentId}/contract/terminate` | account | [Contract termination request](#contract-termination-request) | [`DocumentContract`](#contract-termination-response) |
+
 ### Documents
 
 | SDK method | HTTP operation | Auth | Request | Unwrapped SDK response |
@@ -294,7 +309,7 @@ it back, not only its `state`. `refreshToken` raises `OAuthError`
 | <a id="documents-download"></a>`documents.download(documentId, artifactName)` | `GET /documents/{documentId}/download/{artifactName}` | account | path/query only | native [`Response`](#unwrapped-json-pagination-raw-responses-and-void) |
 | <a id="documents-thumbnail"></a>`documents.thumbnail(documentId)` | `GET /documents/{documentId}/thumbnail` | account | path/query only | native [`Response`](#unwrapped-json-pagination-raw-responses-and-void) |
 | <a id="documents-download-page"></a>`documents.downloadPage(documentId, pageId)` | `GET /documents/{documentId}/pages/{pageId}/download` | account | path/query only | native [`Response`](#unwrapped-json-pagination-raw-responses-and-void) |
-| <a id="documents-activities"></a>`documents.activities(documentId)` | `GET /documents/{documentId}/activities` | account | path/query only | [`DocumentActivity[]`](#document-activity-response) |
+| <a id="documents-activities"></a>`documents.activities(documentId, query?)` | `GET /documents/{documentId}/activities` | account | `{ sort? }` | [`DocumentActivity[]`](#document-activity-response) |
 | <a id="documents-verify"></a>`documents.verify(signatureHash)` | `GET /documents/{documentSignatureHash}/verify` | public | path/query only | [`DocumentVerificationResult`](#document-verification-response) |
 | <a id="documents-public-get"></a>`documents.publicGet(documentId)` | `GET /public/documents/{documentId}` | public | path/query only | [`Document \| PublicDocument`](#public-document-response) |
 | <a id="documents-send-public-token"></a>`documents.sendPublicToken(documentId, input)` | `PUT /public/documents/{documentId}/send-token` | public | [`SendPublicTokenInput`](#send-public-token-request) | [`SendPublicTokenResult`](#send-public-token-response) |
@@ -331,7 +346,7 @@ Document-tag operations take tag **IDs**, not tag names.
 | <a id="assignments-create"></a>`assignments.create(documentId, input)` | `POST /documents/{documentId}/assignments` | account | [`CreateAssignmentInput`](#create-assignment-request) | [`Assignment`](#assignment-response) |
 | <a id="assignments-estimate-cost"></a>`assignments.estimateCost(documentId, input)` | `POST /documents/{documentId}/assignments/estimate-cost` | account | [`EstimateAssignmentCostInput`](#estimate-assignment-cost-request) | [`CostEstimate`](#cost-estimate-response) |
 | <a id="assignments-resend-to-signer"></a>`assignments.resendToSigner(documentId, assignmentId, signerId)` | `PUT /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/resend` | account | path/query only | [`ResendNotificationResult`](#resend-response) |
-| <a id="assignments-estimate-resend-cost"></a>`assignments.estimateResendCost(documentId, assignmentId, signerId)` | `POST /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/estimate-resend-cost` | account | path/query only | [`CostEstimate`](#cost-estimate-response) |
+| <a id="assignments-estimate-resend-cost"></a>`assignments.estimateResendCost(documentId, assignmentId, signerId)` | `POST /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/estimate-resend-cost` | account | path/query only | [`ResendCostEstimate`](#resend-cost-estimate-response) |
 | <a id="assignments-reset-expiration"></a>`assignments.resetExpiration(documentId, assignmentId, expiresAt)` | `PUT /documents/{documentId}/assignments/{assignmentId}/reset-expiration` | account | [`{ expires_at }`](#reset-expiration-request) | [`Assignment`](#assignment-response) |
 | <a id="assignments-sign"></a>`assignments.sign(documentId, assignmentId, accessCode, entries)` | alias of `signature.sign()` | signer code | [`SignFieldEntry[]`](#sign-assignment-request) | [`void`](#unwrapped-json-pagination-raw-responses-and-void) |
 | <a id="assignments-decline"></a>`assignments.decline(documentId, assignmentId, accessCode, declineReason)` | alias of `signature.decline()` | signer code | [`{ decline_reason }`](#decline-request) | [`void`](#unwrapped-json-pagination-raw-responses-and-void) |
@@ -395,14 +410,14 @@ methods.
 | <a id="webhooks-list-event-types"></a>`webhooks.listEventTypes()` | `GET /webhooks/event-types` | account | path/query only | [`WebhookEventTypeInfo[]`](#webhook-event-type-response) |
 | <a id="webhooks-list-dispatches"></a>`webhooks.listDispatches(accountId, query?)` | `GET /accounts/{accountId}/webhooks` | account | [`ListWebhookDispatchesQuery`](#webhook-dispatch-list-query) | [`Page<WebhookDispatch>`](#webhook-dispatch-response) |
 | <a id="webhooks-retry-dispatch"></a>`webhooks.retryDispatch(accountId, dispatchId)` | `POST /accounts/{accountId}/webhooks/{historyId}/retry` | account | path/query only | [`WebhookDispatch`](#webhook-dispatch-response) |
-| <a id="webhooks-list-endpoints"></a>`webhooks.listEndpoints(accountId)` | `GET /accounts/{accountId}/webhooks/endpoints` | account | path/query only | [`WebhookEndpoint[]`](#webhook-endpoint-response) |
+| <a id="webhooks-list-endpoints"></a>`webhooks.listEndpoints(accountId, query?)` | `GET /accounts/{accountId}/webhooks/endpoints` | account | `{ url? }` | [`WebhookEndpoint[]`](#webhook-endpoint-response) |
 | <a id="webhooks-create-endpoint"></a>`webhooks.createEndpoint(accountId, input)` | `POST /accounts/{accountId}/webhooks/endpoints` | account | [`CreateWebhookEndpointInput`](#webhook-endpoint-request) | [`WebhookEndpoint`](#webhook-endpoint-response) |
 | <a id="webhooks-get-endpoint"></a>`webhooks.getEndpoint(accountId, endpointId)` | `GET /accounts/{accountId}/webhooks/endpoints/{endpointId}` | account | path/query only | [`WebhookEndpoint`](#webhook-endpoint-response) |
 | <a id="webhooks-update-endpoint"></a>`webhooks.updateEndpoint(accountId, endpointId, input)` | `PUT /accounts/{accountId}/webhooks/endpoints/{endpointId}` | account | [`UpdateWebhookEndpointInput`](#webhook-endpoint-request) | [`WebhookEndpoint`](#webhook-endpoint-response) |
 | <a id="webhooks-delete-endpoint"></a>`webhooks.deleteEndpoint(accountId, endpointId)` | `DELETE /accounts/{accountId}/webhooks/endpoints/{endpointId}` | account | path/query only | [`void`](#unwrapped-json-pagination-raw-responses-and-void) |
 | <a id="webhooks-delete-endpoint-by-url"></a>`webhooks.deleteEndpointByUrl(accountId, url)` | `DELETE /accounts/{accountId}/webhooks/endpoints` | account | [`url`](#delete-webhook-endpoint-by-url-request) | [`void`](#unwrapped-json-pagination-raw-responses-and-void) |
 | <a id="webhooks-get-endpoint-secret"></a>`webhooks.getEndpointSecret(accountId, endpointId)` | `GET /accounts/{accountId}/webhooks/endpoints/{endpointId}/secret` | account, not OAuth | path/query only | [`WebhookEndpointSecret`](#webhook-endpoint-secret-response) |
-| <a id="webhooks-rotate-endpoint-secret"></a>`webhooks.rotateEndpointSecret(accountId, endpointId)` | `POST /accounts/{accountId}/webhooks/endpoints/{endpointId}/secret/rotate` | account, not OAuth | path/query only | [`WebhookEndpointSecret`](#webhook-endpoint-secret-response) |
+| <a id="webhooks-rotate-endpoint-secret"></a>`webhooks.rotateEndpointSecret(accountId, endpointId)` | `POST /accounts/{accountId}/webhooks/endpoints/{endpointId}/secret/rotate` | account | path/query only | [`WebhookEndpointSecret`](#webhook-endpoint-secret-response) |
 
 The sandbox returns `404` for deletion by URL, even for an existing endpoint;
 use `deleteEndpoint` by ID there. The identity-verification routes are currently
@@ -465,9 +480,14 @@ The body is omitted when `options.force` is `undefined`.
   "primary_color": "#164E63",
   "secondary_color": "#22D3EE",
   "notification_sender_type": "Account",
-  "roles": ["Owner"],
+  "roles": [
+    "Owner"
+  ],
   "is_delete_allowed": true,
-  "created_at": "2026-08-20T14:30:00Z"
+  "created_at": "2026-08-20T14:30:00Z",
+  "limits": {
+    "webhook_endpoints": 3
+  }
 }
 ```
 
@@ -815,7 +835,9 @@ optional.
 #### Notification preferences
 
 The update request may contain any non-empty subset. The response always
-contains the complete map:
+contains all thirteen settings. The four `Contract*` response properties are
+optional in the SDK type to preserve compatibility with older preference maps.
+These personal settings are unavailable to third-party OAuth applications (`403`).
 
 ```json
 {
@@ -827,7 +849,11 @@ contains the complete map:
   "DocumentExpirationReset": true,
   "DocumentProcessingFailed": true,
   "TemplateProcessingFailed": true,
-  "SignerWhatsappFailed": true
+  "SignerWhatsappFailed": true,
+  "ContractRenewalNotice": true,
+  "ContractExpiring": true,
+  "ContractExpired": true,
+  "ContractRenewed": true
 }
 ```
 
@@ -954,7 +980,9 @@ attempts defeats PKCE and CSRF protection.
 
 `oauth.readAuthorizationCallback` accepts the query in whatever shape the web
 framework produces: a full callback URL, a `URL`, a `URLSearchParams`, a bare
-`code=…&state=…` string, or a plain object such as Express's `request.query`.
+`code=…&state=…&iss=…` string (with or without a leading `?`), or a plain
+object such as Express's `request.query`. URL values inside a query may be
+percent-encoded or unescaped.
 
 ```json
 {
@@ -1157,7 +1185,7 @@ notification destination before assigning the signer.
 }
 ```
 
-All fields are optional. The API normalizes `government_id` to digits.
+All fields are optional. The API normalizes `government_id`; CNPJ may include letters.
 
 #### Confirm signer data request
 
@@ -1200,9 +1228,12 @@ after the confirmation; the deprecated `whatsapp_phone_number` input is ignored.
     }
   ],
   "verification_method": "Email",
-  "notification_methods": ["Email"],
+  "notification_methods": [
+    "Email"
+  ],
   "step": 1,
-  "notified": true
+  "notified": true,
+  "identity_verification_status": null
 }
 ```
 
@@ -1282,9 +1313,13 @@ but send only `search`, `sort`, `page` and `per-page`; `status`, `method` and
 ```json
 {
   "search": "contract",
-  "status": ["pending_signature", "certificated"],
+  "status": [
+    "pending_signature",
+    "certificated"
+  ],
   "page": 1,
-  "perPage": 20
+  "perPage": 20,
+  "sort": "-created_at"
 }
 ```
 
@@ -1401,7 +1436,9 @@ the nested assignment, item, page, signer, summary, and signing URL objects:
         "completed": false,
         "notification_history": [],
         "verification_method": "Email",
-        "notification_methods": ["Email"],
+        "notification_methods": [
+          "Email"
+        ],
         "step": 1,
         "notified": true
       }
@@ -1466,13 +1503,16 @@ the nested assignment, item, page, signer, summary, and signing URL objects:
     "signing_urls": [
       {
         "signer_id": "sig_01J00000000000000000000000",
-        "url": "https://app.assinafy.com.br/sign/access-code"
+        "url": "https://example.com/sign?signer-access-code=placeholder"
       }
     ],
     "completed_at": null,
     "created_at": "2026-08-20T14:31:00Z",
     "updated_at": "2026-08-20T14:31:00Z"
-  }
+  },
+  "has_contract": false,
+  "verification_code": null,
+  "verification_url": null
 }
 ```
 
@@ -1786,13 +1826,20 @@ properties.
 }
 ```
 
-`signers` is required. Each signer needs the template `role_id` and an existing
-signer `id`. `tags` contains names; missing names are created and the resulting
-tags are merged with the template defaults. The published `editor_fields` form
-is the array shown above. The SDK sends only the fields shown: a deprecated
-keyed `editor_fields` object is converted to that array, and the deprecated
-inline-signer properties (`full_name`, `email`, `whatsapp_phone_number`) are not
-sent.
+`signers` is required. Each binding needs `role_id` and either an existing
+signer `id` or an `email`. Bind every role with `assignment_type: "Signer"`;
+`CopyReceiver` bindings are optional and `Editor` roles use `editor_fields`.
+An email binding may also supply `name` and `whatsapp_phone_number`:
+
+```json
+{
+  "signers": [{ "role_id": "role_example", "email": "signer@example.com", "name": "Example Signer", "whatsapp_phone_number": "+5511999999999" }]
+}
+```
+
+`tags` contains names; missing names are created and merged with template defaults.
+The published `editor_fields` form is the array shown above. A deprecated keyed
+object is converted to that array. Deprecated `full_name` is ignored; use `name`.
 
 #### Estimate template cost request
 
@@ -1808,8 +1855,8 @@ sent.
 }
 ```
 
-Include a binding for every signer role returned by `templates.get()`, not just
-`roles[0]`; roles with `assignment_type: "Editor"` are not signers. Supply required
+Include a binding for every `Signer` role returned by `templates.get()`, not just
+`roles[0]`; `CopyReceiver` is optional and `Editor` roles are not signers. Supply required
 editor values through `editor_fields` when instantiating. Passing the signer array
 directly is an SDK shorthand; the wire body is always the object above.
 
@@ -1845,10 +1892,288 @@ This example prices one digital-certificate signer with email notification: the
 signature costs 0.5 credit and the notification is free. WhatsApp notification
 adds 0.45 credit. Read the returned breakdown for the selected methods and plan.
 
-The shared `CostEstimate` response type covers assignment, resend, and template
-estimation. Its fields are optional because estimate operations can return
-different subsets. `ResendCostEstimate` remains exported as a deprecated type;
-new code should use the `CostEstimate` returned by `estimateResendCost()`.
+`CostEstimate` covers assignment and template estimation; its fields are optional
+because those operations can return different subsets.
+
+#### Resend cost estimate response
+
+```json
+{
+  "total": 0.45,
+  "breakdown": [{ "code": "NotificationWhatsappResend", "name": "WhatsApp resend", "cost": 0.45 }],
+  "credit_balance": 100,
+  "has_sufficient_credits": true
+}
+```
+
+`assignments.estimateResendCost` returns `ResendCostEstimate`. `credit_balance`
+may be null. Legacy estimate properties remain optional for compatibility.
+
+### Contract payloads
+
+#### Contract list query
+
+```json
+{
+  "status": ["active", "expired"],
+  "counterparty": "Example Organization",
+  "search": "Service agreement",
+  "end_date_from": "2026-11-01",
+  "end_date_to": "2027-10-31",
+  "ending_within_days": 30,
+  "external_system": "crm",
+  "external_id": "record-123",
+  "sort": "-updated_at",
+  "expand": "document",
+  "page": 1,
+  "perPage": 20
+}
+```
+
+All filters are optional and combine to narrow the result. `status` also accepts
+comma-separated text; `perPage` becomes `per-page`. `ending_within_days` accepts
+0–3650; zero means today in Brasília. Sort is `end_date`, `-end_date`,
+`updated_at` or `-updated_at` (the default); absent end dates sort last.
+`expand: "document"` adds the [full document](#document-response).
+
+#### Contract update request
+
+```json
+{
+  "status": "active",
+  "counterparty_name": "Example Organization",
+  "counterparty_taxpayer_id": null,
+  "value": 12000.5,
+  "currency": "BRL",
+  "start_date": "2026-11-01",
+  "end_date": "2027-10-31",
+  "auto_renew": false,
+  "renewal_term_months": 12,
+  "notice_period_days": 30,
+  "owner_id": null,
+  "metadata": { "crm_stage": "won" },
+  "external_references": [{ "system": "crm", "id": "record-123" }],
+  "updated_at": "2026-10-28T12:00:00Z"
+}
+```
+
+Every attribute is optional, but send at least one. Omit `updated_at` on creation;
+send the exact timestamp read on updates to protect against lost changes.
+A stale timestamp returns `409` with `code: "ContractChanged"`; the SDK preserves
+the complete error body in `ApiError.body` and never retries a mutation.
+
+Only supplied fields change. Null clears nullable fields; clearing `currency`
+restores `BRL` while a value remains. `external_references` replaces the entire
+list; `[]` or null clears it. The API validates CPF/CNPJ, dates (YYYY-MM-DD,
+year 1000 onward), nonnegative amounts with at most two decimals, renewal terms
+of 1–600 months, notice periods of 0–3650 days and active workspace owners.
+Metadata accepts at most 50 keys of 1–40 letters, digits, underscores, hyphens or
+periods, each with at most 500 text characters. External references accept at
+most 20 `{ system, id }` pairs; system is at most 64 letters/digits/_.-, and id
+at most 255 characters without emoji or other four-byte characters.
+
+`expired` and `terminated` may register already-ended contracts on creation.
+Subsequent status writes use `draft` or `active`; an active contract cannot go
+back to draft. The lifecycle closes contracts, and renewal reopens an expired
+contract. Cancelled, declined and expired documents cannot receive new terms,
+but existing terms remain editable. Changing `end_date` advances the term.
+
+To link another uploaded document as an instrument, update that document:
+
+```json
+{
+  "parent_document_id": "document_contract_example",
+  "relation_type": "amendment",
+  "value": 14000,
+  "end_date": "2028-10-31"
+}
+```
+
+A first link requires `relation_type`: `amendment`, `renewal` or `termination`.
+The parent may be any document in the family; the API resolves the root.
+Amendments may change value, currency, dates, auto-renewal, renewal months,
+notice period, counterparty fields and metadata. Renewal instruments may change
+only end date and value; termination instruments only end date.
+A pending link merges new terms; null drops a delta key. To unlink it, send
+`{ "parent_document_id": null }`. Use the link's own `updated_at` for its
+precondition. Applied instruments are read-only.
+
+#### Contract response
+
+`get` and `update` return either the contract or its amendment. Narrow by
+`resource`. `related` always returns the root contract with its family, even
+when called using an amendment document id.
+
+```json
+{
+  "resource": "document_contract",
+  "document_id": "document_contract_example",
+  "status": "active",
+  "counterparty_name": "Example Organization",
+  "counterparty_taxpayer_id": null,
+  "value": 12000.5,
+  "currency": "BRL",
+  "start_date": "2026-11-01",
+  "end_date": "2027-10-31",
+  "auto_renew": false,
+  "renewal_term_months": 12,
+  "notice_period_days": 30,
+  "term": 1,
+  "owner_id": null,
+  "metadata": { "crm_stage": "won" },
+  "external_references": [{ "system": "crm", "id": "record-123" }],
+  "amendments": [],
+  "created_at": "2026-10-28T12:00:00Z",
+  "updated_at": "2026-10-28T12:00:00Z"
+}
+```
+
+Single-contract and related reads include `amendments`. Each amendment, also
+returned directly when reading or updating that instrument's document, has:
+
+```json
+{
+  "resource": "document_contract_amendment",
+  "document_id": "document_amendment_example",
+  "document_name": "Amendment.pdf",
+  "parent_document_id": "document_contract_example",
+  "relation_type": "amendment",
+  "number": null,
+  "status": "pending",
+  "document_status": "metadata_ready",
+  "apply_error": null,
+  "currency": "BRL",
+  "terms": { "value": 14000, "end_date": "2028-10-31" },
+  "changes": {
+    "value": { "from": 12000.5, "to": 14000 },
+    "end_date": { "from": "2027-10-31", "to": "2028-10-31" },
+    "term": { "from": 1, "to": 2 }
+  },
+  "applied_at": null,
+  "created_at": "2026-10-28T12:00:00Z",
+  "updated_at": "2026-10-28T12:00:00Z"
+}
+```
+
+Certification applies the delta in signing order. Applied instruments carry
+`status: "applied"`, a sequential `number` and `applied_at`; their `changes`
+become a fixed record. `apply_error` explains a blocked application. The hourly
+run retries blocked instruments; a blocked earlier instrument holds later ones.
+An instrument signed before one already applied cannot overwrite it: unlink
+the pending link and record the remaining change in a new instrument.
+
+#### Contract list response
+
+```json
+{
+  "data": [
+    {
+      "resource": "document_contract",
+      "document_id": "document_contract_example",
+      "status": "active",
+      "counterparty_name": "Example Organization",
+      "counterparty_taxpayer_id": null,
+      "value": 12000.5,
+      "currency": "BRL",
+      "start_date": "2026-11-01",
+      "end_date": "2027-10-31",
+      "auto_renew": false,
+      "renewal_term_months": 12,
+      "notice_period_days": 30,
+      "term": 1,
+      "owner_id": null,
+      "metadata": { "crm_stage": "won" },
+      "external_references": [{ "system": "crm", "id": "record-123" }],
+      "created_at": "2026-10-28T12:00:00Z",
+      "updated_at": "2026-10-28T12:00:00Z"
+    }
+  ],
+  "pagination": { "currentPage": 1, "pageCount": 1, "perPage": 20, "totalCount": 1 }
+}
+```
+
+#### Contract renewal request
+
+```json
+{ "term": 1, "value": null, "updated_at": "2026-10-28T12:00:00Z" }
+```
+
+Or choose a later end date explicitly:
+
+```json
+{ "end_date": "2028-10-31", "value": 14000, "updated_at": "2026-10-28T12:00:00Z" }
+```
+
+Supply the current `term` or a nonblank `end_date`; the SDK rejects a request
+with neither before fetch. Without an explicit date, the API advances by
+`renewal_term_months` (12 when unset) until the new date is in the future.
+Omitting value preserves it; null clears it. Repeating the same term/date cannot
+renew twice: the API refuses it with `400`, or `409` if its timestamp is stale.
+An expired contract may reopen; a terminated contract returns `400`.
+
+#### Contract renewal response
+
+```json
+{
+  "resource": "document_contract",
+  "document_id": "document_contract_example",
+  "status": "active",
+  "counterparty_name": "Example Organization",
+  "counterparty_taxpayer_id": null,
+  "value": 14000,
+  "currency": "BRL",
+  "start_date": "2026-11-01",
+  "end_date": "2028-10-31",
+  "auto_renew": false,
+  "renewal_term_months": 12,
+  "notice_period_days": 30,
+  "term": 2,
+  "owner_id": null,
+  "metadata": { "crm_stage": "won" },
+  "external_references": [{ "system": "crm", "id": "record-123" }],
+  "created_at": "2026-10-28T12:00:00Z",
+  "updated_at": "2026-10-28T12:05:00Z"
+}
+```
+
+#### Contract termination request
+
+```json
+{ "reason": "Agreement ended", "updated_at": "2026-10-28T12:05:00Z" }
+```
+
+Both fields are optional; omission sends `{}`. Reason accepts null or up to 500
+characters; the API removes HTML and records it in the termination event.
+
+#### Contract termination response
+
+```json
+{
+  "resource": "document_contract",
+  "document_id": "document_contract_example",
+  "status": "terminated",
+  "counterparty_name": "Example Organization",
+  "counterparty_taxpayer_id": null,
+  "value": 14000,
+  "currency": "BRL",
+  "start_date": "2026-11-01",
+  "end_date": "2028-10-31",
+  "auto_renew": false,
+  "renewal_term_months": 12,
+  "notice_period_days": 30,
+  "term": 2,
+  "owner_id": null,
+  "metadata": { "crm_stage": "won" },
+  "external_references": [{ "system": "crm", "id": "record-123" }],
+  "created_at": "2026-10-28T12:00:00Z",
+  "updated_at": "2026-10-28T12:10:00Z"
+}
+```
+
+Termination stops the contract's lifecycle alerts; it does not cancel the
+signing document. Activity records are available through `documents.activities`.
+Validation errors use `400` and an `errors` array of `{ field, code, message }`;
+a plan without contract tracking returns `403` on writes. Reads remain available.
 
 ### Assignment payloads
 
@@ -1857,11 +2182,16 @@ new code should use the `CostEstimate` returned by `estimateResendCost()`.
 ```json
 {
   "page": 1,
-  "perPage": 20
+  "perPage": 20,
+  "accountId": "account_example",
+  "sort": "-created_at"
 }
 ```
 
 The SDK encodes `perPage` as `per-page`.
+
+With an API key, `accountId` is required to select the workspace. OAuth selects
+its connected workspace; the explicit filter may be omitted.
 
 #### Create assignment request
 
@@ -2071,7 +2401,7 @@ Decline:
   "signing_urls": [
     {
       "signer_id": "sig_01J00000000000000000000000",
-      "url": "https://app.assinafy.com.br/sign/access-code"
+      "url": "https://example.com/sign?signer-access-code=placeholder"
     }
   ],
   "completed_at": null,
@@ -2079,6 +2409,8 @@ Decline:
   "updated_at": "2026-08-20T14:31:00Z"
 }
 ```
+
+`Assignment.document_id` and `sender_email` may be null in list responses.
 
 #### Resend response
 
@@ -2095,13 +2427,13 @@ Decline:
 ```json
 [
   {
-    "sent_at": 1787238000,
+    "sent_at": "2026-08-20T15:00:00Z",
     "header": "Signature requested",
     "body": "Please sign contract.pdf",
     "buttons": [
       {
         "text": "Open document",
-        "url": "https://app.assinafy.com.br/sign/access-code"
+        "url": "https://example.com/sign?signer-access-code=placeholder"
       }
     ],
     "phone_number": "+5511999999999",
@@ -2109,6 +2441,10 @@ Decline:
   }
 ]
 ```
+
+WhatsApp notification URLs can contain bearer access/verification codes; keep
+them out of logs. Sandbox delivery may be simulated. The SDK accepts legacy
+numeric `sent_at` values as well as the documented ISO timestamp.
 
 ### Identity verification payloads
 
@@ -2442,6 +2778,40 @@ The SDK encodes it as `search=contract` alongside the signer access code.
 
 ### Webhook payloads
 
+#### Delivered webhook event
+
+After verifying the raw body with `verifyStandardWebhook`, parse it as
+`WebhookEvent`. The body is independent of the REST response envelope:
+
+```json
+{
+  "id": 12345,
+  "event": "document_contract_updated",
+  "message": null,
+  "payload": { "document_id": "document_contract_example" },
+  "origin": { "ip": "203.0.113.7", "user-agent": "example-integration/1.0" },
+  "created_at": 1793188800,
+  "subject": { "type": "User", "id": "user_example" },
+  "object": { "type": "Document", "id": "document_contract_example", "has_contract": true },
+  "account_id": "account_example"
+}
+```
+
+`id`, `event`, `created_at`, `subject`, `object` and `account_id` are required.
+`message`, `payload` and `origin` may be omitted or null. Payload keys vary by
+event. Subject/object are polymorphic records with resource-specific fields.
+They are serialized from current state at delivery time; their `*_at` fields
+and the top-level `created_at` are Unix seconds, unlike REST ISO timestamps.
+Deduplicate by the `webhook-id` header, which separates deliveries to different
+endpoints. List current event identifiers with `webhooks.listEventTypes`.
+
+Contract events include `document_contract_updated`,
+`document_contract_amendment_updated`, `document_contract_amended`,
+`document_contract_renewal_notice`, `document_contract_expiring`,
+`document_contract_expired`, `document_contract_renewed` and
+`document_contract_terminated`. Recover missed events through the document's
+activities and the contract list ordered by `-updated_at`.
+
 #### Webhook endpoint request
 
 `createEndpoint` requires `url`, `email`, and `events`; `updateEndpoint` sends
@@ -2470,15 +2840,23 @@ discards the secret.
   "name": "ERP",
   "url": "https://example.com/webhooks/assinafy",
   "email": "webhooks@example.test",
-  "events": ["document_ready", "signer_signed_document"],
+  "events": [
+    "document_ready",
+    "signer_signed_document"
+  ],
   "is_active": true,
   "signing_enabled": true,
   "created_at": "2026-10-01T12:00:00Z",
-  "updated_at": "2026-10-01T12:00:00Z"
+  "updated_at": "2026-10-01T12:00:00Z",
+  "is_held": false,
+  "held_since": null
 }
 ```
 
-`listEndpoints` returns an array of these, oldest first.
+`listEndpoints` returns an array of these, oldest first. Its optional `{ url }`
+query filters by exact registered URL. Create/update responses may additionally
+include a generated `secret`; list/get do not reveal the stored secret.
+`is_held` and `held_since` describe paused delivery following repeated failures.
 
 #### Delete webhook endpoint by URL request
 
@@ -2500,8 +2878,11 @@ ID remains available through `deleteEndpoint`.
 }
 ```
 
-Both secret methods answer `400` when signing is disabled and are refused to
-OAuth applications. Rotation takes effect immediately.
+Both secret methods answer `400` when signing is disabled. Reading an existing
+secret is unavailable to OAuth applications. Rotation accepts OAuth with
+`webhooks:write`, returns the new secret once and takes effect immediately.
+Creating an endpoint with signing enabled, or enabling signing on an existing
+endpoint, also returns a newly generated `secret` once; store it securely.
 
 #### Verifying a signed delivery
 
@@ -2556,7 +2937,9 @@ Known event IDs are typed, and the type also accepts new event strings.
   "url": "https://example.com/webhooks/assinafy",
   "email": "webhooks@example.test",
   "created_at": "2026-08-20T14:30:00Z",
-  "updated_at": "2026-08-20T14:35:00Z"
+  "updated_at": "2026-08-20T14:35:00Z",
+  "is_held": false,
+  "held_since": null
 }
 ```
 
@@ -2615,7 +2998,11 @@ incompletely configured records can contain `null` for `url`, `email`, or
   "response_body": "ok",
   "error": null,
   "created_at": "2026-08-20T15:00:00Z",
-  "updated_at": "2026-08-20T15:00:01Z"
+  "updated_at": "2026-08-20T15:00:01Z",
+  "webhook_id": "msg_example",
+  "attempt": 1,
+  "kind": "scheduled",
+  "will_retry": false
 }
 ```
 
@@ -2636,7 +3023,7 @@ custom or newly published endpoints.
 | `AssinafyClient.fromEnv(env?)` | Reads `ASSINAFY_API_KEY`, `ASSINAFY_ACCESS_TOKEN`, `ASSINAFY_BASE_URL`, and `ASSINAFY_ACCOUNT_ID`; returns an unauthenticated client if neither credential exists. |
 | `accountId` | The optional default account ID supplied by the caller. Resource methods still take explicit account IDs. |
 | `http` | Configured `HttpClient` instance for advanced calls. |
-| `accounts`, `assignments`, `auth`, `documents`, `fields`, `oauth`, `signature`, `signers`, `tags`, `templates`, `users`, `webhooks` | Stateless resource instances documented above. |
+| `accounts`, `assignments`, `auth`, `contracts`, `documents`, `fields`, `oauth`, `signature`, `signers`, `tags`, `templates`, `users`, `webhooks` | Stateless resource instances documented above. |
 
 Complete constructor example:
 
@@ -2993,7 +3380,7 @@ Complete card payload using every primitive:
         {
           "type": "link-button",
           "label": "Open",
-          "url": "https://app.assinafy.com.br/sign/access-code",
+          "url": "https://example.com/sign?signer-access-code=placeholder",
           "style": "primary"
         },
         {
@@ -3055,11 +3442,12 @@ and an `execute(args)` method that validates the input before calling the client
 `options.accountId` overrides `client.accountId`. Without either default, every
 account-scoped tool requires `accountId`. `include` and `exclude` filter stable
 tool names. `runTool(tools, name, args)` finds and executes a tool or throws for
-an unknown name. Validation failures throw before any API request.
+an unknown name. Validation failures reject with `ConfigurationError` before any API request.
 
 `getEndpointSecret` and `rotateEndpointSecret` have no tool on purpose: a
 signing secret must not enter a model's context, and a rotation breaks the
-receiver immediately.
+receiver immediately. Create/update webhook tools also remove `secret` from
+their results; the REST resource retains it for secure receiver configuration.
 
 The full 41-tool catalog follows. Braces show argument keys; keys suffixed `?`
 are optional. Results link to the same unwrapped payloads as the resource
