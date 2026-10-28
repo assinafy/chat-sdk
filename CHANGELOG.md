@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Automatic GitHub Releases with the version's changelog entries and the
+  published package attached after both registries succeed.
 - Contract lifecycle management through `client.contracts`: listing, terms,
   amendment families, renewal and termination, with timestamp preconditions.
 - Contract notification preferences, typed contract webhook events and the

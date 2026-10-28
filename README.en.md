@@ -1176,7 +1176,9 @@ Unit tests and example type-checking need no network access and no credentials.
 
 CI runs type checks, lint, unit tests, and packaging on every push and pull request.
 Release tags re-run verification and publish the same artifact to npm with OIDC
-provenance and to GitHub Packages.
+provenance and to GitHub Packages. After both publications succeed, the workflow
+creates a GitHub Release with that version's `CHANGELOG.md` entries and attaches
+the same package. Missing or empty changelog entries block publication.
 
 ---
 

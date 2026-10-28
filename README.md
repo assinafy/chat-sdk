@@ -1213,7 +1213,9 @@ de credenciais.
 
 A CI roda verificação de tipos, lint, testes unitários e empacotamento em todo push e
 pull request. Tags de release repetem a verificação e publicam o mesmo artefato
-no npm com procedência OIDC e no GitHub Packages.
+no npm com procedência OIDC e no GitHub Packages. Após as duas publicações, o
+workflow cria um GitHub Release com as entradas da versão no `CHANGELOG.md` e
+anexa o mesmo pacote. Entradas ausentes ou vazias impedem a publicação.
 
 ---
 
