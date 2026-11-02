@@ -295,7 +295,7 @@ export class SignatureResource {
     accessCode?: string,
   ): Promise<Response> {
     void accessCode;
-    return this.http.rawRequest(paths.signerDownload(signerId, documentId, artifactName));
+    return this.signer.rawRequest(paths.signerDownload(signerId, documentId, artifactName));
   }
 }
 

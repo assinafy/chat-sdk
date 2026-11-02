@@ -512,9 +512,11 @@ export class OAuthResource {
     // to persist, and persisting the old one sets up a fatal replay.
     const next = tokens.refresh_token;
     if (typeof next !== "string" || !next.trim() || next === options.refreshToken) {
-      throw callbackError(
+      throw oauthError(
         "invalid_grant",
         "The token endpoint returned no new refresh_token; the connection must be re-established",
+        paths.token(),
+        "POST",
       );
     }
     return tokens;
@@ -597,7 +599,12 @@ export class OAuthResource {
   private async requestToken(body: Record<string, string | undefined>): Promise<OAuthTokenResponse> {
     const { data: tokens } = await this.anonymous.request<OAuthTokenResponse>(paths.token(), formPost(body));
     if (typeof tokens?.access_token !== "string" || !tokens.access_token) {
-      throw callbackError("invalid_grant", "The token endpoint returned no access_token");
+      throw oauthError(
+        "invalid_grant",
+        "The token endpoint returned no access_token",
+        paths.token(),
+        "POST",
+      );
     }
     return tokens;
   }
@@ -657,11 +664,21 @@ function formPost(body: Record<string, string | undefined>): RequestInit {
  * `state` that does not match, or a token response with no token in it.
  */
 function callbackError(error: string, errorDescription?: string): OAuthError {
+  return oauthError(error, errorDescription, "/oauth/authorize", "GET");
+}
+
+/** An OAuth protocol failure detected by the SDK rather than an HTTP response. */
+function oauthError(
+  error: string,
+  errorDescription: string | undefined,
+  path: string,
+  method: string,
+): OAuthError {
   return new OAuthError({
     status: 400,
     body: { error, error_description: errorDescription },
-    path: "/oauth/authorize",
-    method: "GET",
+    path,
+    method,
     message: errorDescription ?? `OAuth authorization failed: ${error}`,
     error,
     errorDescription,

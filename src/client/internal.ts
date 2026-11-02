@@ -73,5 +73,10 @@ export function withAccessCode(
  * alongside (or instead of) the code.
  */
 export function signerTransport(http: HttpClient): HttpClient {
+  return anonymousTransport(http);
+}
+
+/** Credential-free copy of the transport for public API operations. */
+export function anonymousTransport(http: HttpClient): HttpClient {
   return http.fork({ auth: { kind: "none" } });
 }

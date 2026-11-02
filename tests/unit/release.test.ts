@@ -65,7 +65,7 @@ describe("release notes", () => {
       cwd: fileURLToPath(new URL("../../", import.meta.url)), encoding: "utf8",
     });
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toContain("### Added");
+    expect(result.stdout).toContain("### Fixed");
   });
 });
 

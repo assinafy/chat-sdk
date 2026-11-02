@@ -10,7 +10,7 @@
 
 import { withQuery, type HttpClient } from "./http.js";
 import { ConfigurationError } from "./errors.js";
-import { csv, pageQuery, toUploadBlob } from "./internal.js";
+import { anonymousTransport, csv, pageQuery, toUploadBlob } from "./internal.js";
 import type {
   Document,
   DocumentActivity,
@@ -48,7 +48,11 @@ const paths = {
 
 /** Document upload, listing, artifacts, verification and the public document routes (`client.documents`). */
 export class DocumentsResource {
-  constructor(private readonly http: HttpClient) {}
+  private readonly anonymous: HttpClient;
+
+  constructor(private readonly http: HttpClient) {
+    this.anonymous = anonymousTransport(http);
+  }
 
   /** `GET /documents/statuses` — `[{ code, deletable }]` for every document status. */
   statuses(): Promise<DocumentStatus[]> {
@@ -185,12 +189,12 @@ export class DocumentsResource {
    * completed_count, completed_at, verified_at, is_valid, message }`.
    */
   verify(signatureHash: string): Promise<DocumentVerificationResult> {
-    return this.http.get<DocumentVerificationResult>(paths.verify(signatureHash));
+    return this.anonymous.get<DocumentVerificationResult>(paths.verify(signatureHash));
   }
 
   /** `GET /public/documents/{documentId}` — public read of a document (used by signer UIs). */
   publicGet(documentId: string): Promise<Document | PublicDocument> {
-    return this.http.get<Document | PublicDocument>(paths.publicGet(documentId));
+    return this.anonymous.get<Document | PublicDocument>(paths.publicGet(documentId));
   }
 
   /**
@@ -213,6 +217,6 @@ export class DocumentsResource {
     if (typeof recipient !== "string" || recipient.trim() === "") {
       throw new ConfigurationError("sendPublicToken requires the signer's email as recipient");
     }
-    return this.http.put<SendPublicTokenResult>(paths.sendToken(documentId), { channel, recipient });
+    return this.anonymous.put<SendPublicTokenResult>(paths.sendToken(documentId), { channel, recipient });
   }
 }

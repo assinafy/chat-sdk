@@ -134,6 +134,33 @@ describe("AssinafyClient resource paths", () => {
     expect(new Headers(requests[0]!.init.headers).has("authorization")).toBe(false);
   });
 
+  it.each([undefined, "workspace-token"])(
+    "keeps workspace credentials off every public operation (%s)",
+    async (accessToken) => {
+      const { client, requests } = makeClient(Array.from({ length: 10 }, () => ({})), accessToken);
+
+      await client.auth.login({ email: "user@example.test", password: "pw" });
+      await client.auth.verifyMfa({ mfa_token: "challenge", code: "123456" });
+      await client.auth.socialLogin({ provider: "google", token: "identity", has_accepted_terms: true });
+      await client.auth.requestPasswordReset({ email: "user@example.test" });
+      await client.auth.resetPassword({ email: "user@example.test", token: "reset", new_password: "new" });
+      await client.documents.verify("signature-hash");
+      await client.documents.publicGet("document");
+      await client.documents.sendPublicToken("document", { channel: "email", recipient: "signer@example.test" });
+      await client.signature.downloadDocument("signer", "document", "original");
+      await client.auth.changePassword({ email: "user@example.test", password: "old", new_password: "new" });
+
+      for (const request of requests.slice(0, -1)) {
+        const headers = new Headers(request.init.headers);
+        expect(headers.has("x-api-key")).toBe(false);
+        expect(headers.has("authorization")).toBe(false);
+      }
+      const authenticated = new Headers(requests.at(-1)!.init.headers);
+      expect(authenticated.get(accessToken ? "authorization" : "x-api-key"))
+        .toBe(accessToken ? `Bearer ${accessToken}` : "test-key");
+    },
+  );
+
   it("uses the documented single API-key endpoints", async () => {
     const { client, requests } = makeClient([{ api_key: "masked" }, {}]);
 

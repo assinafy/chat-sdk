@@ -43,8 +43,9 @@ that only need the REST client should import `@assinafy/chat-sdk/client`.
 | `public` | No API credential |
 
 `AssinafyClient` sends one configured account credential. Passing both `apiKey`
-and `accessToken` throws `ConfigurationError`. Public and signer-code methods may
-be called with an unauthenticated client.
+and `accessToken` throws `ConfigurationError`. Public methods use a
+credential-free transport even when the client has an account credential;
+signer-code methods send only the access code.
 
 Signer access codes and URLs containing them are bearer credentials. Send them
 only over HTTPS; keep them out of logs, analytics, exception messages, source

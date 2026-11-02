@@ -1,6 +1,6 @@
 {
   "name": "@assinafy/chat-sdk",
-  "version": "2.6.0",
+  "version": "2.6.1",
   "description": "Chat SDK for Assinafy — build chat bots and conversational integrations on top of the Assinafy document-signing API.",
   "homepage": "https://www.assinafy.com.br",
   "license": "MIT",
@@ -19,7 +19,8 @@
     "access": "public"
   },
   "overrides": {
-    "esbuild": "0.28.2"
+    "esbuild": "0.28.2",
+    "minimatch": "11.0.4"
   },
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",

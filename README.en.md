@@ -147,10 +147,9 @@ authenticator code, or a recovery code.
 > `LoginResponse | MfaChallenge`. Code that reads `access_token` directly must
 > first narrow with `"mfa_token" in result`, as above.
 
-Constructing with neither credential is deliberate and supported: an
-unauthenticated client is what you use for `auth.login()`, public document
-verification, and the signer-facing endpoints that authenticate with a signer
-access code instead.
+Constructing with neither credential is deliberate and supported. Public
+methods omit a configured workspace credential automatically, and signer-facing
+methods send only their signer access code.
 
 Beyond credentials, the constructor accepts transport settings — a custom
 `fetch`, `maxRetries`, `retryBaseDelayMs`, a `userAgent` override, and an

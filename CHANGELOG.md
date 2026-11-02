@@ -5,6 +5,21 @@ All notable changes to `@assinafy/chat-sdk` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.1] - 2026-11-02
+
+### Changed
+
+- The Portuguese guide presents the complete signing and OAuth lifecycles in a
+  compact quick start; full method payloads remain in the API reference.
+- Development tooling pins `minimatch` 11.0.4.
+
+### Fixed
+
+- Public login, password recovery, document verification, public-document and
+  signer-download requests use a credential-free transport.
+- SDK-generated OAuth token-response errors identify `/oauth/token` and the
+  `POST` method.
+
 ## [2.6.0] - 2026-10-28
 
 ### Added

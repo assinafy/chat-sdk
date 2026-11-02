@@ -401,7 +401,11 @@ describe("token endpoint", () => {
     const { client } = clientWith({ "/v1/oauth/token": () => json({ token_type: "Bearer" }) });
     await expect(
       client.oauth.refreshToken({ refreshToken: "rt", clientId: "app-1" }),
-    ).rejects.toThrow(/no access_token/);
+    ).rejects.toMatchObject({
+      path: "/oauth/token",
+      method: "POST",
+      message: expect.stringMatching(/no access_token/),
+    });
   });
 
   it.each([
@@ -417,7 +421,12 @@ describe("token endpoint", () => {
       .refreshToken({ refreshToken: "rt_live_sent", clientId: "app-1" })
       .catch((caught: unknown) => caught as OAuthError);
     expect(error).toBeInstanceOf(OAuthError);
-    expect(error).toMatchObject({ error: "invalid_grant", message: expect.stringMatching(/no new refresh_token/) });
+    expect(error).toMatchObject({
+      error: "invalid_grant",
+      path: "/oauth/token",
+      method: "POST",
+      message: expect.stringMatching(/no new refresh_token/),
+    });
     const exposed = JSON.stringify({ ...error, message: error.message });
     expect(exposed).not.toContain(TOKENS.access_token);
     expect(exposed).not.toContain("rt_live_sent");

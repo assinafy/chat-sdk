@@ -9,6 +9,7 @@
  */
 
 import type { HttpClient } from "./http.js";
+import { anonymousTransport } from "./internal.js";
 import type {
   ApiKeyRecord,
   ChangePasswordInput,
@@ -30,7 +31,11 @@ import type {
 
 /** Login, two-factor, password and API-key operations (`client.auth`). */
 export class AuthResource {
-  constructor(private readonly http: HttpClient) {}
+  private readonly anonymous: HttpClient;
+
+  constructor(private readonly http: HttpClient) {
+    this.anonymous = anonymousTransport(http);
+  }
 
   /**
    * Email + password login. Returns a bearer access token, or an
@@ -39,7 +44,7 @@ export class AuthResource {
    */
   async login(input: LoginInput): Promise<LoginResponse | MfaChallenge> {
     const { email, password } = input;
-    return this.http.post<LoginResponse | MfaChallenge>("/login", { email, password });
+    return this.anonymous.post<LoginResponse | MfaChallenge>("/login", { email, password });
   }
 
   /**
@@ -48,13 +53,13 @@ export class AuthResource {
    */
   async verifyMfa(input: VerifyMfaInput): Promise<LoginResponse> {
     const { mfa_token, code } = input;
-    return this.http.post<LoginResponse>("/authentication/mfa/verify", { mfa_token, code });
+    return this.anonymous.post<LoginResponse>("/authentication/mfa/verify", { mfa_token, code });
   }
 
   /** Sign in or register with a Google identity token. */
   async socialLogin(input: SocialLoginInput): Promise<LoginResponse> {
     const { provider, token, has_accepted_terms } = input;
-    return this.http.post<LoginResponse>("/authentication/social-login", { provider, token, has_accepted_terms });
+    return this.anonymous.post<LoginResponse>("/authentication/social-login", { provider, token, has_accepted_terms });
   }
 
   /** Link a social-login provider account to the authenticated user. */
@@ -106,13 +111,13 @@ export class AuthResource {
   /** Trigger a password-reset email. */
   async requestPasswordReset(input: RequestPasswordResetInput): Promise<EmailResult> {
     const { email } = input;
-    return this.http.put<EmailResult>("/authentication/request-password-reset", { email });
+    return this.anonymous.put<EmailResult>("/authentication/request-password-reset", { email });
   }
 
   /** Complete a password reset using the token from the reset email. */
   async resetPassword(input: ResetPasswordInput): Promise<EmailResult> {
     const { email, token, new_password } = input;
-    return this.http.put<EmailResult>("/authentication/reset-password", { email, token, new_password });
+    return this.anonymous.put<EmailResult>("/authentication/reset-password", { email, token, new_password });
   }
 
   /** `GET /users/self/mfa` — enrolled two-factor methods and unused recovery-code count. */
