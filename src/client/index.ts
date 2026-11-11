@@ -25,6 +25,8 @@ import { AssignmentsResource } from "./assignments.js";
 import { AuthResource } from "./auth.js";
 import { ContractsResource } from "./contracts.js";
 import { DocumentsResource } from "./documents.js";
+import { EnvelopesResource } from "./envelopes.js";
+import { EmbeddedResource } from "./embedded.js";
 import { FieldsResource } from "./fields.js";
 import { ConfigurationError } from "./errors.js";
 import { HttpClient, type AuthStrategy, type HttpClientOptions } from "./http.js";
@@ -38,6 +40,10 @@ import { WebhooksResource } from "./webhooks.js";
 
 export * from "./errors.js";
 export * from "./types.js";
+export * from "./envelope-types.js";
+export * from "./embedded-types.js";
+export { EnvelopesResource } from "./envelopes.js";
+export { EmbeddedResource } from "./embedded.js";
 export { HttpClient, withQuery } from "./http.js";
 export type { AuthStrategy, HttpClientOptions, ResponseWithMeta } from "./http.js";
 export { AccountsResource, type UploadAccountLogoInput } from "./accounts.js";
@@ -114,6 +120,8 @@ export class AssinafyClient {
   readonly oauth: OAuthResource;
   readonly signers: SignersResource;
   readonly documents: DocumentsResource;
+  readonly envelopes: EnvelopesResource;
+  readonly embedded: EmbeddedResource;
   readonly fields: FieldsResource;
   readonly tags: TagsResource;
   readonly templates: TemplatesResource;
@@ -139,6 +147,8 @@ export class AssinafyClient {
     this.oauth = new OAuthResource(this.http);
     this.signers = new SignersResource(this.http);
     this.documents = new DocumentsResource(this.http);
+    this.envelopes = new EnvelopesResource(this.http);
+    this.embedded = new EmbeddedResource(this.http);
     this.fields = new FieldsResource(this.http);
     this.tags = new TagsResource(this.http);
     this.templates = new TemplatesResource(this.http);

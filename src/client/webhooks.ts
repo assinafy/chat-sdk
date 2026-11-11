@@ -104,11 +104,17 @@ export class WebhooksResource {
 
   /**
    * Replace the signing secret. The old one stops working immediately, so
-   * deploy the new secret to the receiver right away. `400` when signing is
+   * deploy it right away, or pass `keep_previous: true` for 24 hours of overlap. `400` when signing is
    * disabled. Requires the `webhooks:write` OAuth scope when using OAuth.
    */
-  rotateEndpointSecret(accountId: string, endpointId: string): Promise<WebhookEndpointSecret> {
-    return this.http.post<WebhookEndpointSecret>(`${paths.endpoint(accountId, endpointId)}/secret/rotate`);
+  async rotateEndpointSecret(accountId: string, endpointId: string, options: { keep_previous?: boolean } = {}): Promise<WebhookEndpointSecret> {
+    return this.http.post<WebhookEndpointSecret>(`${paths.endpoint(accountId, endpointId)}/secret/rotate`,
+      options.keep_previous === undefined ? undefined : { keep_previous: options.keep_previous });
+  }
+
+  /** Send one webhook_test delivery, even to an inactive/paused endpoint. Never retried. */
+  testEndpoint(accountId: string, endpointId: string): Promise<WebhookDispatch> {
+    return this.http.post<WebhookDispatch>(`${paths.endpoint(accountId, endpointId)}/test`);
   }
 
   /**

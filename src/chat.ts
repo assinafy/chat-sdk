@@ -271,9 +271,12 @@ export class Chat implements ChatHandle {
   // ---------------------------------------------------------------------------
 
   private async initializeAdapters(): Promise<void> {
-    for (const adapter of Object.values(this.adapters)) {
-      await adapter.initialize(this);
-    }
+    // Finish every pending start before disconnect can clean up a failed startup.
+    const results = await Promise.allSettled(
+      Object.values(this.adapters).map(async (adapter) => adapter.initialize(this)),
+    );
+    const failure = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
+    if (failure) throw failure.reason;
   }
 
   private requireAdapter(name: string): ChatAdapter {

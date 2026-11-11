@@ -579,12 +579,14 @@ export class OAuthResource {
    *   "email_verified": true
    * }
    * ```
+   * @throws {ConfigurationError} If an explicitly supplied access token is blank.
    * @throws {ApiError} `401` when the token expired or was revoked.
    * @throws {OAuthError} `insufficient_scope` when `openid` was never granted — the missing
    *   permission is on {@link OAuthError.scope}.
    */
-  getUserInfo(accessToken?: string): Promise<OAuthUserInfo> {
-    const auth: AuthStrategy | undefined = accessToken
+  async getUserInfo(accessToken?: string): Promise<OAuthUserInfo> {
+    if (accessToken !== undefined) requireNonEmpty(accessToken, "accessToken");
+    const auth: AuthStrategy | undefined = accessToken !== undefined
       ? { kind: "bearer", token: accessToken }
       : undefined;
     const http = auth ? this.http.fork({ auth }) : this.http;

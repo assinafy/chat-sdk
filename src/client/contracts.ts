@@ -93,10 +93,11 @@ export class ContractsResource {
   /**
    * `GET /accounts/{accountId}/documents/{documentId}/contract/related` —
    * the root {@link DocumentContract} and all its amendments, from either
-   * the root document or any linked instrument. No request body.
+   * the root document or any linked instrument. `expand: "document"` embeds
+   * the root document. No request body.
    */
-  related(accountId: string, documentId: string): Promise<DocumentContract> {
-    return this.http.get(`${paths.item(accountId, documentId)}/related`);
+  async related(accountId: string, documentId: string, query: { expand?: "document" } = {}): Promise<DocumentContract> {
+    return this.http.get(withQuery(`${paths.item(accountId, documentId)}/related`, { expand: query.expand }));
   }
 
   /**

@@ -184,6 +184,12 @@ describeProduction("Assinafy API — opt-in disposable production resources", ()
         }));
         expect(typeof cost.has_sufficient_resources).toBe("boolean");
         expect(Array.isArray(cost.breakdown)).toBe(true);
+        if (verification_method === "DigitalCertificate") {
+          const defaultCost = await request("default-method certificate estimate", () => client.assignments.estimateCost(document.id, {
+            signers: [{ verification_method, notification_methods: ["Email"] }],
+          }));
+          expect(defaultCost.total_credits).toBe(cost.total_credits);
+        }
       } catch (error) {
         failures.push(error);
       }

@@ -38,6 +38,8 @@ for (const format of ["esm", "cjs"]) {
 
 const { AssinafyClient } = await import(new URL("../dist/client/index.js", import.meta.url));
 const client = new AssinafyClient({ baseUrl: "https://example.com/v1" });
+assert.ok(client.embedded, "EmbeddedResource is missing from the built client");
+assert.ok(client.envelopes, "EnvelopesResource is missing from the built client");
 assert.ok(client.contracts, "ContractsResource is missing from the built client");
 assert.ok(client.users, "UsersResource is missing from the built client");
 

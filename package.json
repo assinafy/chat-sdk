@@ -1,6 +1,6 @@
 {
   "name": "@assinafy/chat-sdk",
-  "version": "2.6.1",
+  "version": "2.7.0",
   "description": "Chat SDK for Assinafy — build chat bots and conversational integrations on top of the Assinafy document-signing API.",
   "homepage": "https://www.assinafy.com.br",
   "license": "MIT",
@@ -123,14 +123,14 @@
   ],
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@types/node": "^24.13.3",
-    "@typescript-eslint/eslint-plugin": "^8.68.0",
-    "@typescript-eslint/parser": "^8.68.0",
+    "@types/node": "^24.19.2",
+    "@typescript-eslint/eslint-plugin": "^8.72.2",
+    "@typescript-eslint/parser": "^8.72.2",
     "@vitest/coverage-v8": "^4.1.12",
     "dotenv": "^17.4.2",
-    "eslint": "^10.9.1",
+    "eslint": "^10.14.0",
     "tsup": "^8.5.1",
-    "tsx": "^4.23.12",
+    "tsx": "^4.23.15",
     "typescript": "^6.0.3",
     "vitest": "^4.1.12"
   },

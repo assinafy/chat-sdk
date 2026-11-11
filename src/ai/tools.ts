@@ -343,6 +343,7 @@ export function createChatTools(
           message: { type: "string" },
           expires_at: { type: "string", format: "date-time" },
           copy_receivers: { type: "array", items: { type: "string" } },
+          max_total_credits: { type: "number", minimum: 0, description: "Maximum credits to charge; use the total from the last estimate." },
         },
         required: ["documentId", "method"],
         anyOf: [
@@ -361,6 +362,7 @@ export function createChatTools(
           message: args.message,
           expires_at: args.expires_at,
           copy_receivers: args.copy_receivers,
+          max_total_credits: args.max_total_credits,
         } as CreateAssignmentInput),
     }),
 
@@ -435,6 +437,7 @@ export function createChatTools(
           message: { type: "string" },
           signers: { type: "array", minItems: 1, items: TEMPLATE_SIGNER_SCHEMA },
           tags: { type: "array", items: { type: "string" } },
+          max_total_credits: { type: "number", minimum: 0, description: "Maximum credits to charge; creation is refused if its cost exceeds this." },
           editor_fields: {
             type: "array",
             items: {
@@ -454,6 +457,7 @@ export function createChatTools(
         message?: string;
         signers: TemplateSignerInput[];
         tags?: string[];
+        max_total_credits?: number;
         expires_at?: string;
         editor_fields?: Array<{ field_id: string; value: string }>;
       }) =>
@@ -462,6 +466,7 @@ export function createChatTools(
           message: args.message,
           signers: args.signers,
           tags: args.tags,
+          max_total_credits: args.max_total_credits,
           expires_at: args.expires_at,
           editor_fields: args.editor_fields,
         }),
@@ -909,7 +914,7 @@ function webhookEndpointResult(endpoint: WebhookEndpoint): Omit<WebhookEndpoint,
 
 const SIGNER_METHOD_PROPERTIES = {
   verification_method: { type: "string", enum: ["Email", "Whatsapp", "DigitalCertificate", "IdDocumentFaceMatchBasic"] },
-  notification_methods: { type: "array", items: { type: "string", enum: ["Email", "Whatsapp"] } },
+  notification_methods: { type: "array", maxItems: 1, items: { type: "string", enum: ["Email", "Whatsapp"] } },
 } as const;
 
 const ASSIGNMENT_SIGNER_PROPERTIES = {

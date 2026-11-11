@@ -1,6 +1,6 @@
 # Assinafy v1 API operation index
 
-This index lists the 118 Assinafy v1 operations, their SDK methods, request and
+This index lists the 147 Assinafy v1 operations, their SDK methods, request and
 response documentation, and authentication mode. Paths include the `/v1`
 prefix; SDK resource methods use a `baseUrl` that already contains it.
 
@@ -26,20 +26,22 @@ Authentication labels:
 
 | API group | Operations |
 | --- | ---: |
-| Accounts | 10 |
+| Accounts | 13 |
 | Assignments | 10 |
 | Authentication | 15 |
 | Contracts | 6 |
 | Documents | 18 |
+| Embedded Signing | 6 |
+| Envelopes | 12 |
 | Fields | 8 |
 | OAuth | 4 |
 | Signers | 5 |
-| Signing | 19 |
+| Signing | 24 |
 | Tags | 4 |
 | Templates | 1 |
-| Users | 4 |
-| Webhooks | 14 |
-| **Total** | **118** |
+| Users | 6 |
+| Webhooks | 15 |
+| **Total** | **147** |
 
 ## Operations
 
@@ -285,3 +287,62 @@ These helpers add no HTTP operation of their own:
 - `client.auth.listApiKeys` adapts the single-key response to an array; `client.auth.revokeApiKeys` aliases `deleteApiKey`.
 - `client.assignments.sign` and `client.assignments.decline` are alternate facades for the corresponding signing operations.
 - Assignment signer-id aliases and template estimate array input are normalized locally before the request is sent.
+
+## Embedded Signing (6 operations)
+
+| Method | Path | SDK method | Request | SDK response | Auth |
+| --- | --- | --- | --- | --- | --- |
+| GET | `/v1/accounts/{accountId}/embed-origins` | `client.embedded.listOrigins` | [Request](API_REFERENCE.md#embedded-list-origins) | [Unwrapped response](API_REFERENCE.md#embed-origin-response) | Bearer / API key; no OAuth apps |
+| POST | `/v1/accounts/{accountId}/embed-origins` | `client.embedded.createOrigin` | [Request](API_REFERENCE.md#embedded-create-origin) | [Unwrapped response](API_REFERENCE.md#embed-origin-response) | Bearer / API key; no OAuth apps |
+| PUT | `/v1/accounts/{accountId}/embed-origins/{originId}` | `client.embedded.updateOrigin` | [Request](API_REFERENCE.md#embedded-update-origin) | [Unwrapped response](API_REFERENCE.md#embed-origin-response) | Bearer / API key; no OAuth apps |
+| DELETE | `/v1/accounts/{accountId}/embed-origins/{originId}` | `client.embedded.deleteOrigin` | [Request](API_REFERENCE.md#embedded-delete-origin) | [Void response](API_REFERENCE.md#embed-origin-response) | Bearer / API key; no OAuth apps |
+| POST | `/v1/documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/embed-sessions` | `client.embedded.createSession` | [Request](API_REFERENCE.md#embedded-create-session) | [Unwrapped response](API_REFERENCE.md#embed-session-response) | Bearer / API key |
+| POST | `/v1/embed/sessions/{token}/exchange` | `client.embedded.exchangeSession` | [Request](API_REFERENCE.md#embed-session-exchange-request) | [Unwrapped response](API_REFERENCE.md#embed-session-exchange-response) | Public; session token in path |
+
+Origin management requires the embedded-signing plan feature and permits ten
+exact origins. Session URLs expire in five minutes and are single-use. Exchange
+is intended for Assinafy's embed page and spends its token even on a `409`.
+The SDK strips workspace credentials on exchange and never retries these
+mutations. Session URLs and signer access codes are excluded from AI tools.
+
+## Envelopes (12 operations)
+
+| Method | Path | SDK method | Request | SDK response | Auth |
+| --- | --- | --- | --- | --- | --- |
+| GET | `/v1/accounts/{accountId}/envelopes` | `client.envelopes.list` | [Request](API_REFERENCE.md#envelope-list-request) | [Paginated response](API_REFERENCE.md#envelope-list-response) | Bearer / API key; documents:read |
+| POST | `/v1/accounts/{accountId}/envelopes` | `client.envelopes.create` | [Request](API_REFERENCE.md#envelope-create-request) | [Unwrapped response](API_REFERENCE.md#envelope-response) | Bearer / API key; documents:write |
+| POST | `/v1/accounts/{accountId}/envelopes/estimate-cost` | `client.envelopes.estimateCost` | [Request](API_REFERENCE.md#envelope-create-request) | [Unwrapped response](API_REFERENCE.md#envelope-cost-response) | Bearer / API key; documents:write |
+| GET | `/v1/accounts/{accountId}/envelopes/{envelopeId}` | `client.envelopes.get` | [Request](API_REFERENCE.md#envelopes-get) | [Unwrapped response](API_REFERENCE.md#envelope-response) | Bearer / API key; documents:read |
+| DELETE | `/v1/accounts/{accountId}/envelopes/{envelopeId}` | `client.envelopes.remove` | [Request](API_REFERENCE.md#envelopes-remove) | [Void response](API_REFERENCE.md#envelope-cancellation-response) | Bearer / API key; documents:write |
+| PATCH | `/v1/accounts/{accountId}/envelopes/{envelopeId}` | `client.envelopes.update` | [Request](API_REFERENCE.md#envelope-update-request) | [Unwrapped response](API_REFERENCE.md#envelope-response) | Bearer / API key; documents:write |
+| GET | `/v1/accounts/{accountId}/envelopes/{envelopeId}/activities` | `client.envelopes.activities` | [Request](API_REFERENCE.md#envelopes-activities) | [Paginated response](API_REFERENCE.md#envelope-activity-response) | Bearer / API key; documents:read |
+| GET | `/v1/accounts/{accountId}/envelopes/{envelopeId}/download/{artifactName}` | `client.envelopes.download` | [Request](API_REFERENCE.md#envelopes-download) | [Raw ZIP response](API_REFERENCE.md#envelope-download-response) | Bearer / API key; documents:read |
+| PUT | `/v1/accounts/{accountId}/envelopes/{envelopeId}/cancel` | `client.envelopes.cancel` | [Request](API_REFERENCE.md#envelopes-cancel) | [Unwrapped response](API_REFERENCE.md#envelope-cancellation-response) | Bearer / API key; documents:write |
+| PUT | `/v1/accounts/{accountId}/envelopes/{envelopeId}/signers/{signerId}/resend` | `client.envelopes.resendToSigner` | [Request](API_REFERENCE.md#envelopes-resend-to-signer) | [Unwrapped response](API_REFERENCE.md#envelope-resend-response) | Bearer / API key; documents:write |
+| POST | `/v1/accounts/{accountId}/envelopes/{envelopeId}/documents` | `client.envelopes.addDocument` | [Request](API_REFERENCE.md#envelope-add-document-request) | [Unwrapped response](API_REFERENCE.md#envelope-response) | Bearer / API key; documents:write |
+| DELETE | `/v1/accounts/{accountId}/envelopes/{envelopeId}/documents/{documentId}` | `client.envelopes.removeDocument` | [Request](API_REFERENCE.md#envelopes-remove-document) | [Unwrapped response](API_REFERENCE.md#envelope-response) | Bearer / API key; documents:write |
+
+Create, estimate and add-document need the Envelopes plan feature. Creation
+accepts an optional workspace-scoped `Idempotency-Key`; create and add-document
+accept `max_total_credits`. Mutations never retry automatically. Sending,
+resending, adding, removing and cancelling can notify participants; estimates
+and metadata updates send nothing. Each envelope permits 20 signers, 20
+documents, 2,000 fields and 100 copy receivers. See the linked request sections
+for signing-method restrictions and the lifecycle through certification.
+
+
+### Workspace settings and signer delivery
+
+| Method | Path | SDK method | Request | SDK response | Auth |
+| --- | --- | --- | --- | --- | --- |
+| GET | `/v1/accounts/{accountId}/usage` | `client.accounts.getUsage` | [Request](API_REFERENCE.md#accounts-get-usage) | [Response](API_REFERENCE.md#accounts-get-usage) | Bearer / API key |
+| GET | `/v1/accounts/{accountId}/notification-policy` | `client.accounts.getNotificationPolicy` | [Request](API_REFERENCE.md#accounts-get-notification-policy) | [Response](API_REFERENCE.md#accounts-get-notification-policy) | Bearer / API key |
+| PUT | `/v1/accounts/{accountId}/notification-policy` | `client.accounts.updateNotificationPolicy` | [Request](API_REFERENCE.md#accounts-update-notification-policy) | [Response](API_REFERENCE.md#accounts-update-notification-policy) | Bearer / API key |
+| GET | `/v1/users/self/push-preferences` | `client.users.getPushPreferences` | [Request](API_REFERENCE.md#users-get-push-preferences) | [Response](API_REFERENCE.md#users-get-push-preferences) | Bearer / API key |
+| PUT | `/v1/users/self/push-preferences` | `client.users.updatePushPreferences` | [Request](API_REFERENCE.md#users-update-push-preferences) | [Response](API_REFERENCE.md#users-update-push-preferences) | Bearer / API key |
+| GET | `/v1/sign/theme` | `client.signature.getTheme` | [Request](API_REFERENCE.md#signature-get-theme) | [Response](API_REFERENCE.md#signature-get-theme) | Signer access code |
+| GET | `/v1/sign/logo` | `client.signature.downloadLogo` | [Request](API_REFERENCE.md#signature-download-logo) | [Response](API_REFERENCE.md#signature-download-logo) | Signer access code |
+| POST | `/v1/sign/certified-copy` | `client.signature.sendCertifiedCopy` | [Request](API_REFERENCE.md#signature-send-certified-copy) | [Response](API_REFERENCE.md#signature-send-certified-copy) | Signer access code |
+| GET | `/v1/signers/downloads/{token}` | `client.signature.downloadCertifiedCopy` | [Request](API_REFERENCE.md#signature-download-certified-copy) | [Response](API_REFERENCE.md#signature-download-certified-copy) | Public |
+| POST | `/v1/signers/downloads/{token}/resend` | `client.signature.resendCertifiedCopy` | [Request](API_REFERENCE.md#signature-resend-certified-copy) | [Response](API_REFERENCE.md#signature-resend-certified-copy) | Public |
+| POST | `/v1/accounts/{accountId}/webhooks/endpoints/{endpointId}/test` | `client.webhooks.testEndpoint` | [Request](API_REFERENCE.md#webhooks-test-endpoint) | [Response](API_REFERENCE.md#webhooks-test-endpoint) | Bearer / API key |

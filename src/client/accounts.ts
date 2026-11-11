@@ -13,6 +13,9 @@ import { toUploadBlob } from "./internal.js";
 import type {
   Account,
   AccountTheme,
+  AccountUsage,
+  NotificationPolicy,
+  UpdateNotificationPolicyInput,
   CreateAccountInput,
   DeleteAccountInput,
   DocumentStatsQuery,
@@ -51,8 +54,24 @@ export class AccountsResource {
   }
 
   /** Fetch a single workspace account by id. */
-  get(accountId: string): Promise<Account> {
-    return this.http.get<Account>(paths.item(accountId));
+  async get(accountId: string, query: { expand?: "signing_features" } = {}): Promise<Account> {
+    return this.http.get<Account>(withQuery(paths.item(accountId), { expand: query.expand }));
+  }
+
+  /** Plan and remaining balances. Third-party OAuth applications receive 403. */
+  getUsage(accountId: string): Promise<AccountUsage> {
+    return this.http.get<AccountUsage>(`${paths.item(accountId)}/usage`);
+  }
+
+  /** Read the workspace policy, including whether the current member can edit it. */
+  getNotificationPolicy(accountId: string): Promise<NotificationPolicy> {
+    return this.http.get<NotificationPolicy>(`${paths.item(accountId)}/notification-policy`);
+  }
+
+  /** Merge owner-controlled alerts. Unknown event codes are rejected by the API. */
+  async updateNotificationPolicy(accountId: string, input: UpdateNotificationPolicyInput): Promise<NotificationPolicy> {
+    const { owners_receive_all, events } = input;
+    return this.http.put<NotificationPolicy>(`${paths.item(accountId)}/notification-policy`, { owners_receive_all, events });
   }
 
   /** Update a workspace account's profile. */

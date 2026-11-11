@@ -242,6 +242,39 @@ describe("createChatTools", () => {
     expect(input).not.toHaveProperty("unexpected");
   });
 
+  it("preserves zero credit ceilings and rejects invalid limits before creating anything", async () => {
+    const client = fakeClient();
+    const tools = createChatTools(client);
+    const assignment = { documentId: "d1", method: "virtual", signers: [{ id: "s1" }] };
+    const template = { templateId: "t1", signers: [{ role_id: "r1", id: "s1" }] };
+    for (const [name, args] of [["create_assignment", assignment], ["instantiate_template", template]] as const) {
+      await runTool(tools, name, { ...args, max_total_credits: 0 });
+      for (const max_total_credits of [-1, NaN, "0"]) {
+        await expect(runTool(tools, name, { ...args, max_total_credits })).rejects.toBeInstanceOf(ConfigurationError);
+      }
+      const tool = tools.find((candidate) => candidate.name === name)!;
+      expect(tool.input_schema.properties).toMatchObject({ max_total_credits: { type: "number", minimum: 0 } });
+    }
+    expect(client.assignments.create).toHaveBeenCalledExactlyOnceWith("d1", expect.objectContaining({ max_total_credits: 0 }));
+    expect(client.templates.instantiate).toHaveBeenCalledExactlyOnceWith("acct", "t1", expect.objectContaining({ max_total_credits: 0 }));
+  });
+
+  it("rejects multiple notification channels before assignment, template or estimate requests", async () => {
+    const client = fakeClient();
+    const tools = createChatTools(client);
+    const signer = { id: "s1", role_id: "r1", notification_methods: ["Email", "Whatsapp"] };
+    for (const [name, args] of [
+      ["create_assignment", { documentId: "d1", method: "virtual", signers: [signer] }],
+      ["instantiate_template", { templateId: "t1", signers: [signer] }],
+      ["estimate_assignment_cost", { documentId: "d1", signers: [signer] }],
+    ] as const) {
+      await expect(runTool(tools, name, args)).rejects.toThrow(/at most 1/);
+    }
+    expect(client.assignments.create).not.toHaveBeenCalled();
+    expect(client.templates.instantiate).not.toHaveBeenCalled();
+    expect(client.assignments.estimateCost).not.toHaveBeenCalled();
+  });
+
   it("accepts template signers by email and validates their contact fields", async () => {
     const client = fakeClient();
     const tools = createChatTools(client);

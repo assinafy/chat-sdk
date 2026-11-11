@@ -10,7 +10,6 @@
  */
 
 import { withQuery, type HttpClient } from "./http.js";
-import { SignatureResource } from "./signature.js";
 import { pageQuery, signerTransport, withAccessCode } from "./internal.js";
 import type {
   CreateSignerInput,
@@ -103,26 +102,25 @@ export class SignersResource {
    * or updates their data before signing, authenticated by the access code
    * alone (a missing or blank code rejects before any request).
    *
-   * Request sent: `{ full_name?, email?, government_id? }`. Response: the
+   * Request sent: `{ email?, whatsapp_phone_number?, has_accepted_terms? }`. Response: the
    * {@link Signer} (`{ resource, id, full_name, email, whatsapp_phone_number,
    * government_id, has_accepted_terms }`).
    *
-   * `has_accepted_terms: true` is not part of this operation: the SDK sends it
-   * as a separate `PUT /signers/accept-terms` after the confirmation, which is
-   * what digital-certificate signers need before `signature.signContext`.
-   * `whatsapp_phone_number` is not accepted here and is ignored.
+   * Supply the contact for the signer's verification/notification channel.
+   * `has_accepted_terms: true` accepts terms in the same request, before
+   * digital-certificate signers open `signature.signContext`. Legacy
+   * `full_name` and `government_id` inputs are ignored; update those through
+   * the workspace signer resource.
    */
   async confirmDataForDocument(
     documentId: string,
     accessCode: string,
     input: SignerSelfConfirmDataInput,
   ): Promise<Signer> {
-    const { full_name, email, government_id, has_accepted_terms } = input;
-    const signer = await this.signer.put<Signer>(
+    const { email, whatsapp_phone_number, has_accepted_terms } = input;
+    return this.signer.put<Signer>(
       withAccessCode(paths.selfConfirmData(documentId), accessCode),
-      { full_name, email, government_id },
+      { email, whatsapp_phone_number, has_accepted_terms },
     );
-    if (has_accepted_terms === true) await new SignatureResource(this.http).acceptTerms(accessCode);
-    return signer;
   }
 }

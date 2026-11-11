@@ -61,13 +61,14 @@ export class DocumentsResource {
 
   /**
    * `GET /accounts/{accountId}/documents` — query `status`, `method`,
-   * `search`, `tags`, `sort`, `page`, `per-page` (array filters are joined
+   * `search`, `envelope_id`, `tags`, `sort`, `page`, `per-page` (array filters are joined
    * with commas). Response: `Page<Document>`.
    */
   async list(accountId: string, query: ListDocumentsQuery = {}): Promise<Page<Document>> {
     return this.http.getPage<Document>(
       withQuery(paths.collection(accountId), {
         status: csv(query.status),
+        envelope_id: query.envelope_id,
         method: query.method,
         search: query.search,
         tags: csv(query.tags),
@@ -79,7 +80,7 @@ export class DocumentsResource {
 
   /**
    * `GET /accounts/{accountId}/documents/search` — query `search`, `status`,
-   * `sort`, `page`, `per-page`. Returns a compact document representation
+   * `envelope_id`, `sort`, `page`, `per-page`. Returns a compact document representation
    * (no expanded assignment/pages) — cheaper than {@link list} when you only
    * need to resolve names/ids.
    */
@@ -88,6 +89,7 @@ export class DocumentsResource {
       withQuery(paths.search(accountId), {
         search: query.search,
         status: csv(query.status),
+        envelope_id: query.envelope_id,
         sort: query.sort,
         ...pageQuery(query.page, query.perPage),
       }),
@@ -134,9 +136,12 @@ export class DocumentsResource {
     return response.data;
   }
 
-  /** `GET /documents/{documentId}` — one {@link Document}, with its assignment and pages. */
-  get(documentId: string): Promise<Document> {
-    return this.http.get<Document>(paths.item(documentId));
+  /** `GET /documents/{documentId}` — one document; optionally expand envelope id/name for the workspace. */
+  async get(
+    documentId: string,
+    query: { expand?: "envelope_id" | "envelope" | Array<"envelope_id" | "envelope"> } = {},
+  ): Promise<Document> {
+    return this.http.get<Document>(withQuery(paths.item(documentId), { expand: csv(query.expand) }));
   }
 
   /**
@@ -165,22 +170,30 @@ export class DocumentsResource {
     return this.http.rawRequest(paths.download(documentId, artifactName));
   }
 
-  /** `GET /documents/{documentId}/thumbnail` — the thumbnail image as a raw `Response`. */
-  thumbnail(documentId: string): Promise<Response> {
-    return this.http.rawRequest(paths.thumbnail(documentId));
+  /** `GET /documents/{documentId}/thumbnail` — raw image; `artifact: "certificated"` renders the signed version. */
+  async thumbnail(documentId: string, query: { artifact?: "certificated" } = {}): Promise<Response> {
+    return this.http.rawRequest(withQuery(paths.thumbnail(documentId), { artifact: query.artifact }));
   }
 
-  /** `GET /documents/{documentId}/pages/{pageId}/download` — one page image as a raw `Response`. */
-  downloadPage(documentId: string, pageId: string): Promise<Response> {
-    return this.http.rawRequest(paths.page(documentId, pageId));
+  /** `GET /documents/{documentId}/pages/{pageId}/download` — raw page image; signed rendering requires `artifact: "certificated"`. */
+  async downloadPage(documentId: string, pageId: string, query: { artifact?: "certificated" } = {}): Promise<Response> {
+    return this.http.rawRequest(withQuery(paths.page(documentId, pageId), { artifact: query.artifact }));
   }
 
   /**
-   * `GET /documents/{documentId}/activities` — the activity log, optionally sorted:
+   * `GET /documents/{documentId}/activities` — one page of the activity log:
    * `[{ id, event, message, payload, origin, created_at }]` (`origin` holds the request IP).
+   * Use {@link activitiesPage} to read the pagination headers too.
    */
-  async activities(documentId: string, query: { sort?: string } = {}): Promise<DocumentActivity[]> {
-    return this.http.get<DocumentActivity[]>(withQuery(paths.activities(documentId), { sort: query.sort }));
+  async activities(documentId: string, query: { sort?: string; page?: number; perPage?: number } = {}): Promise<DocumentActivity[]> {
+    return (await this.activitiesPage(documentId, query)).data;
+  }
+
+  /** `GET /documents/{documentId}/activities` — activities plus pagination metadata; newest first unless `sort: "id"`. */
+  async activitiesPage(documentId: string, query: { sort?: string; page?: number; perPage?: number } = {}): Promise<Page<DocumentActivity>> {
+    return this.http.getPage<DocumentActivity>(withQuery(paths.activities(documentId), {
+      sort: query.sort, ...pageQuery(query.page, query.perPage),
+    }));
   }
 
   /**

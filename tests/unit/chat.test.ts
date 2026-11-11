@@ -15,10 +15,7 @@ describe("Chat", () => {
       adapters: { memory: adapter },
       state: new MemoryStateAdapter(),
     });
-    // The Chat constructor schedules adapter.initialize() asynchronously
-    // (microtask). Wait for the next tick so adapters are wired before we
-    // start firing events.
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    await chat.whenReady();
   });
 
   it("routes mentions to onNewMention", async () => {
@@ -85,6 +82,48 @@ describe("Chat", () => {
       state: new MemoryStateAdapter(),
     });
     await expect(c.whenReady()).resolves.toBeUndefined();
+  });
+
+  it("routes events arriving immediately on the second adapter", async () => {
+    const first = createMemoryAdapter({ name: "first" });
+    const second = createMemoryAdapter({ name: "second" });
+    const c = new Chat({ userName: "bot", adapters: { first, second } });
+    const seen: string[] = [];
+    c.onFallback((_, message) => { seen.push(message.text); });
+    c.onAction((_, action) => { seen.push(action.actionId); });
+
+    await Promise.all([
+      second.receive({ text: "startup message" }),
+      second.receiveAction({ threadId: "startup", actionId: "startup action" }),
+    ]);
+    expect(seen.sort()).toEqual(["startup action", "startup message"]);
+  });
+
+  it("waits for all initializers before teardown after a startup failure", async () => {
+    const first = createMemoryAdapter({ name: "first" });
+    const second = createMemoryAdapter({ name: "second" });
+    const failure = new Error("startup failed");
+    Object.assign(first, { initialize: () => { throw failure; } });
+    const initialization = Promise.withResolvers<void>();
+    const events: string[] = [];
+    second.initialize = async () => {
+      events.push("initializing");
+      await initialization.promise;
+      events.push("initialized");
+    };
+    Object.assign(second, { disconnect: async () => { events.push("disconnected"); } });
+    const c = new Chat({ userName: "bot", adapters: { first, second } });
+    const readiness = expect(c.whenReady()).rejects.toBe(failure);
+    const shutdown = c.disconnect();
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(events).toEqual(["initializing"]);
+    initialization.resolve();
+    await readiness;
+    await shutdown;
+    expect(events).toEqual(["initializing", "initialized", "disconnected"]);
+    await expect(c.post("second", "thread", "must not send")).rejects.toBe(failure);
+    expect(second.outbox).toHaveLength(0);
   });
 
   it("rejects a Chat with no adapters", () => {

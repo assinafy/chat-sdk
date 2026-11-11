@@ -7,10 +7,10 @@
 [![npm version](https://img.shields.io/npm/v/@assinafy/chat-sdk.svg)](https://www.npmjs.com/package/@assinafy/chat-sdk)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-SDK TypeScript manual e sem dependências de runtime para as 118 operações da API Assinafy v1, OAuth 2.1, fluxos de assinatura, chat, cards e ferramentas de LLM.
+SDK TypeScript manual e sem dependências de runtime para as 147 operações da API Assinafy v1, OAuth 2.1, fluxos de assinatura, chat, cards e ferramentas de LLM.
 
 - [Referência completa: métodos e payloads](docs/API_REFERENCE.md)
-- [Mapa das 118 operações](docs/API_COVERAGE.md)
+- [Mapa das 147 operações](docs/API_COVERAGE.md)
 - [Documentação oficial da Assinafy](https://api.assinafy.com.br/v1/docs)
 
 ## Instalação e runtime
@@ -82,7 +82,7 @@ const assignment = await client.assignments.create(document.id, {
 | `DigitalCertificate` | `Email` ou `Whatsapp` | ICP-Brasil A1/A3, CPF/CNPJ, assignment `virtual`, signatário sozinho na etapa e Web PKI |
 | `IdDocumentFaceMatchBasic` | `Email` ou `Whatsapp` | CPF, recurso biométrico habilitado e consentimento explícito |
 
-Verificação e notificação são acopladas: envie ambas, uma delas para inferir a outra, ou nenhuma para usar Email. Certificado digital produz PAdES e não conclui pelo endpoint comum de assinatura.
+Cada signatário aceita exatamente uma notificação. Verificação e notificação são acopladas: envie ambas, uma delas para inferir a outra, ou nenhuma para usar Email. Certificado digital produz PAdES e não conclui pelo endpoint comum de assinatura.
 
 No fluxo biométrico, leia `signature.getIdentityVerification(accessCode)`, obtenha consentimento e chame `startIdentityVerification(accessCode, { consent: true })` somente quando `can_start`. Preserve a URL inteira e seu fragmento; não registre nem armazene no browser. Após `InReview`, o signatário pode assinar, mas a certificação aguarda o titular:
 
@@ -97,12 +97,14 @@ Evidências são `no-store`, deixam de existir após a decisão e não devem ir 
 O signatário usa o código entregue fora de banda:
 
 ```ts
-const self = await client.signature.self(accessCode);
+const self = await client.signature.self(accessCode); // verifique verification_method antes do OTP
 await client.signature.verify(accessCode, otp);
 await client.signers.confirmDataForDocument(documentId, accessCode, { has_accepted_terms: true });
 await client.signature.signContext(accessCode);
 await client.signature.sign(documentId, assignment.id, accessCode, []); // assignments "collect" enviam SignFieldEntry[]
 ```
+
+`signContext` e `currentDocument` retornam `SigningDocument`; códigos fechados omitem artefatos e dados da conta. Verifique `is_signer_access_closed` e campos opcionais antes de usá-los. Links em `signing_urls` podem ser nulos para WhatsApp e assinatura incorporada.
 
 Trate códigos, links de assinatura e URLs biométricas como credenciais bearer. Mantenha-os fora de logs, analytics, exceções, repositórios e redirects; use HTTPS e `Referrer-Policy: no-referrer`.
 
@@ -151,6 +153,10 @@ Produção exige sessões vinculadas ao usuário, tentativas com expiração/uso
 Prefira webhooks a polling. Cada endpoint pode usar Standard Webhooks; valide o corpo cru com `verifyStandardWebhook`, rejeite timestamps antigos e deduplique por `webhook-id`. Guarde o segredo retornado ao criar, ativar ou rotacionar.
 
 Contratos usam `client.contracts`: envie o documento, defina os termos, vincule aditivos e execute a assinatura normal. A certificação aplica deltas em ordem; envie `updated_at` para rejeitar escrita obsoleta. Templates exigem todas as roles `Signer`; `Editor` usa `editor_fields` e `CopyReceiver` é opcional.
+
+Envelopes agrupam documentos com `client.envelopes`: estime, crie com `max_total_credits` e uma chave de idempotência, acompanhe cada documento e baixe o ZIP. Criar envia convites. Em assinatura incorporada, registre a origem com `client.embedded`, marque o signatário `embedded: true` e crie uma sessão de cinco minutos no servidor. Entregue a URL completa ao iframe; valide origem e janela de `postMessage`. Troque cada token uma única vez. [Payloads e fluxo](docs/API_REFERENCE.md#embedded-signing).
+
+`accounts.get(accountId, { expand: "signing_features" })` informa os recursos habilitados. `accounts.getUsage`, políticas de notificação e preferências push não aceitam OAuth de terceiros. `signature.getTheme`/`downloadLogo` usam somente o código do signatário; `sendCertifiedCopy` envia ao contato original. `rotateEndpointSecret(..., { keep_previous: true })` mantém ambas as assinaturas por 24 horas.
 
 ## Chat, cards e LLM
 

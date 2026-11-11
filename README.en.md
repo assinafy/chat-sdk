@@ -22,10 +22,10 @@ assumes the one before it.
 
 The SDK is one package with two halves that can be used independently.
 
-**The API client** covers the Assinafy v1 REST API: **118 operations across 90
-paths**, grouped into thirteen resources — accounts, authentication, OAuth, users,
+**The API client** covers the Assinafy v1 REST API: **147 operations across 112
+paths**, grouped into fifteen resources — accounts, authentication, OAuth, users,
 signers, documents, tags, templates, assignments, fields, the signer-facing
-signature flow, contracts, and webhooks. Every operation is typed, and the transport
+signature flow, contracts, envelopes, embedded signing, and webhooks. Every operation is typed, and the transport
 handles authentication, the response envelope, pagination, rate-limit metadata,
 retries, and error mapping.
 
@@ -41,7 +41,7 @@ Two reference documents accompany this one and go deeper than it does:
 - **[API reference](./docs/API_REFERENCE.md)** — every public method with its
   authentication mode, complete request and response payloads, the chat, card,
   adapter, and state surfaces, and the full AI tool catalog.
-- **[API operation index](./docs/API_COVERAGE.md)** — all 118 published
+- **[API operation index](./docs/API_COVERAGE.md)** — all 147 published
   operations mapped to their SDK method, plus the places where the SDK's HTTP
   surface goes beyond the published document.
 
@@ -53,7 +53,7 @@ The authoritative upstream contract is the
 ## 2. Requirements and runtime scope
 
 Server applications require **Node.js 24 or newer**. Development and releases use
-**Node.js 26.13.0 LTS**; CI verifies both Node 24 and Node 26.
+**Node.js 26.13.1 LTS**; CI verifies both Node 24 and Node 26.
 The API accepts HTTPS with TLS 1.2 or higher only, the default of every runtime
 listed below.
 
@@ -185,7 +185,8 @@ character.
 Two hosts are involved on purpose: the consent screen is on
 `auth.assinafy.com.br` and only ever receives a browser, while the token,
 revocation, and userinfo endpoints are on `api.assinafy.com.br` and are only
-ever called server to server. Both are discovered, so nothing is hardcoded.
+called by the OAuth client: confidential clients on the server, public clients
+with PKCE on the user’s device. Both are discovered.
 
 ### The round trip
 
@@ -445,7 +446,8 @@ are redacted before the error is constructed.
 Network failures, `408`, `425`, `429`, and selected `5xx` responses are retried
 with exponential backoff, honoring a server `Retry-After` when one is present.
 Retries apply **only** to `GET`, `HEAD`, and `OPTIONS`. Mutating requests are
-never retried, because the API publishes no idempotency-key contract and a
+never retried automatically. Only envelope and template creation publish
+operation-specific idempotency-key contracts; a
 silent retry could create a duplicate signature request. Aborting through
 `RequestInit.signal` cancels an in-flight retry wait as well as the request.
 
@@ -793,7 +795,8 @@ fields given) and `deleteEndpoint` complete the lifecycle.
 `deleteEndpointByUrl(accountId, url)` removes the exact registered URL. The
 sandbox returns `404` for this operation; use deletion by ID there.
 `rotateEndpointSecret` replaces the secret and the old one stops working
-immediately; OAuth applications may rotate with `webhooks:write`. Store the
+immediately by default; `{ keep_previous: true }` keeps it signing alongside the
+new secret for 24 hours. OAuth applications may rotate with `webhooks:write`. Store the
 one-time secret returned by create/enable/rotate. `getEndpointSecret` reads an
 existing secret only with an API key or user token. `updateSubscription`, `getSubscription` and
 `inactivate` keep working and act on the account's **oldest** endpoint.
@@ -849,7 +852,9 @@ image, retrieving the signing context, listing and searching the signer's
 documents, downloading artifacts, and signing or declining — one document at a
 time or several at once. Digital-certificate signers must confirm their data and
 accept the terms before requesting signing context, which
-`client.signers.confirmDataForDocument()` does in a single call.
+`client.signers.confirmDataForDocument(documentId, accessCode, { has_accepted_terms: true })`
+does in a single call. That endpoint accepts email, WhatsApp phone and terms;
+profile names and government IDs belong to workspace `signers.update`.
 
 Every method that takes an access code rejects a missing or blank one before
 sending anything and never attaches the client's API key or bearer token. To
@@ -1184,3 +1189,30 @@ the same package. Missing or empty changelog entries block publication.
 ## License
 
 MIT — see [LICENSE](./LICENSE).
+
+
+## Envelopes, embedded signing and notification controls
+
+`client.envelopes` groups documents into one signing process. Estimate first,
+create with `max_total_credits` and a stable idempotency key, follow the returned
+documents, and download the ZIP when certification finishes. Creation sends
+invitations; cancellation and reminders also notify participants.
+
+For an iframe, register its exact HTTPS parent origin through `client.embedded`,
+create the assignment with `embedded: true` on the signer, and mint a five-minute
+session on your server. Open the returned URL unchanged. Check both origin and
+source window for `postMessage`. Exchange each session token only once; never
+put session URLs or signer codes in logs or browser storage. See the complete
+[embedded flow](docs/API_REFERENCE.md#embedded-signing) and
+[envelope payloads](docs/API_REFERENCE.md#envelopes).
+
+`accounts.get(accountId, { expand: "signing_features" })` reports enabled signing
+features. `accounts.getUsage`, workspace notification-policy methods and personal
+push preferences are unavailable to third-party OAuth applications.
+`signature.getTheme` and `downloadLogo` use only the signer code. Certified-copy
+resends use the original signing contact, including after the signer code closes.
+
+From 2.7.0, `signContext` and `currentDocument` return `SigningDocument`: closed codes return only its
+required signer/status/certified-copy fields, without artifacts or workspace data.
+Check `is_signer_access_closed` and optional fields before accessing document data.
+Signing URLs may be null for WhatsApp-only and embedded signers.

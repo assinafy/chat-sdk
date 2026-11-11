@@ -3,7 +3,7 @@
 This is the reference for the public surface of `@assinafy/chat-sdk`.
 The REST contracts follow the official OpenAPI document at
 [`https://api.assinafy.com.br/v1/docs/openapi.json`](https://api.assinafy.com.br/v1/docs/openapi.json)
-and the complete 118-operation REST inventory is in the
+and the complete 147-operation REST inventory is in the
 [API operation index](./API_COVERAGE.md).
 
 The client exposes the API operations plus pagination helpers, deprecated
@@ -110,7 +110,7 @@ Every non-2xx response throws `ApiError`. Its public fields are `status`, `body`
 `path`, `method`, `wwwAuthenticate`, `rateLimit` (parsed `X-Rate-Limit-Limit`,
 `-Remaining` and `-Reset`, when present) and `retryAfterSeconds` (the
 `Retry-After` header the API sends with `429 Too Many Requests`); signer access
-codes in `path` are redacted. Network errors,
+codes, embed-session tokens and certified-copy download tokens in `path` are redacted. Network errors,
 `408`, `425`, `429`, and selected `5xx` responses may be retried according to
 `maxRetries` and `retryBaseDelayMs`, but only for safe `GET`, `HEAD`, and
 `OPTIONS` requests. Mutating requests are never retried by the transport. Use
@@ -173,7 +173,7 @@ created by `AssinafyClient`.
 | --- | --- | --- | --- | --- |
 | <a id="accounts-list"></a>`accounts.list()` | `GET /accounts` | account | path/query only | [`Account[]`](#account-response) |
 | <a id="accounts-create"></a>`accounts.create(input)` | `POST /accounts` | account | [`CreateAccountInput`](#create-account-request) | [`Account`](#account-response) |
-| <a id="accounts-get"></a>`accounts.get(accountId)` | `GET /accounts/{accountId}` | account | path/query only | [`Account`](#account-response) |
+| <a id="accounts-get"></a>`accounts.get(accountId, query?)` | `GET /accounts/{accountId}` | account | optional [`expand: "signing_features"`](#workspace-features-and-usage) query | [`Account`](#account-response) |
 | <a id="accounts-update"></a>`accounts.update(accountId, input)` | `PUT /accounts/{accountId}` | account | [`UpdateAccountInput`](#update-account-request) | [`Account`](#account-response) |
 | <a id="accounts-remove"></a>`accounts.remove(accountId, options?)` | `DELETE /accounts/{accountId}` | account | [`DeleteAccountInput`](#delete-account-request) | [`void`](#unwrapped-json-pagination-raw-responses-and-void) |
 | <a id="accounts-get-theme"></a>`accounts.getTheme(accountId)` | `GET /accounts/{accountId}/theme` | account | path/query only | [`AccountTheme`](#account-theme-response) |
@@ -248,6 +248,9 @@ second validates the redirect the browser comes back on.
 | <a id="oauth-revoke-token"></a>`oauth.revokeToken(options)` | `POST /oauth/revoke` | public | [revocation body](#token-revocation-request) | [`void`](#unwrapped-json-pagination-raw-responses-and-void) |
 | <a id="oauth-get-user-info"></a>`oauth.getUserInfo(accessToken?)` | `GET /oauth/userinfo` | bearer | path/query only | [`OAuthUserInfo`](#userinfo-response) |
 
+`getUserInfo` rejects an explicitly blank token with `ConfigurationError`; omitting
+it uses the configured credential.
+
 An access token belongs to exactly one workspace and lives one hour. Refresh
 tokens rotate on every use, and replaying a retired one ends the connection. A
 refresh token is valid for 30 days and every refresh returns a new one with a
@@ -291,7 +294,7 @@ Contract state is independent of document signing. Reads need OAuth
 | <a id="contracts-list"></a>`contracts.list(accountId, query?)` | `GET /accounts/{accountId}/contracts` | account | [Contract list query](#contract-list-query) | [`Page<DocumentContract>`](#contract-list-response) |
 | <a id="contracts-get"></a>`contracts.get(accountId, documentId)` | `GET /accounts/{accountId}/documents/{documentId}/contract` | account | path/query only | [`DocumentContract \| DocumentContractAmendment`](#contract-response) |
 | <a id="contracts-update"></a>`contracts.update(accountId, documentId, input)` | `PUT /accounts/{accountId}/documents/{documentId}/contract` | account | [Contract update request](#contract-update-request) | [`DocumentContract \| DocumentContractAmendment`](#contract-response) |
-| <a id="contracts-related"></a>`contracts.related(accountId, documentId)` | `GET /accounts/{accountId}/documents/{documentId}/contract/related` | account | path/query only | [`DocumentContract`](#contract-response) |
+| <a id="contracts-related"></a>`contracts.related(accountId, documentId, query?)` | `GET /accounts/{accountId}/documents/{documentId}/contract/related` | account | optional [`expand: "document"`](#document-expansions-renders-and-guarded-creation) query | [`DocumentContract`](#contract-response) |
 | <a id="contracts-renew"></a>`contracts.renew(accountId, documentId, input)` | `POST /accounts/{accountId}/documents/{documentId}/contract/renew` | account | [Contract renewal request](#contract-renewal-request) | [`DocumentContract`](#contract-renewal-response) |
 | <a id="contracts-terminate"></a>`contracts.terminate(accountId, documentId, input?)` | `POST /accounts/{accountId}/documents/{documentId}/contract/terminate` | account | [Contract termination request](#contract-termination-request) | [`DocumentContract`](#contract-termination-response) |
 
@@ -304,13 +307,14 @@ Contract state is independent of document signing. Reads need OAuth
 | <a id="documents-search"></a>`documents.search(accountId, query?)` | `GET /accounts/{accountId}/documents/search` | account | [`SearchDocumentsQuery`](#document-search-query) | [`Page<Document>`](#document-response) |
 | <a id="documents-iterate"></a>`documents.iterate(accountId, query?)` | SDK paginator over document list | account | [`ListDocumentsQuery`](#document-list-query) | `AsyncIterableIterator<Document>`; each item is [`Document`](#document-response) |
 | <a id="documents-upload"></a>`documents.upload(accountId, input)` | `POST /accounts/{accountId}/documents` | account | [`multipart/form-data`](#document-upload-request) | [`Document`](#document-response) |
-| <a id="documents-get"></a>`documents.get(documentId)` | `GET /documents/{documentId}` | account | path/query only | [`Document`](#document-response) |
+| <a id="documents-get"></a>`documents.get(documentId, query?)` | `GET /documents/{documentId}` | account | optional [`expand`](#document-expansions-renders-and-guarded-creation) query | [`Document`](#document-response) |
 | <a id="documents-rename"></a>`documents.rename(documentId, name)` | `PATCH /documents/{documentId}` | account | [`{ name }`](#rename-document-request) | [`Document`](#document-response) |
 | <a id="documents-remove"></a>`documents.remove(documentId)` | `DELETE /documents/{documentId}` | account | path/query only | [`void`](#unwrapped-json-pagination-raw-responses-and-void) |
 | <a id="documents-download"></a>`documents.download(documentId, artifactName)` | `GET /documents/{documentId}/download/{artifactName}` | account | path/query only | native [`Response`](#unwrapped-json-pagination-raw-responses-and-void) |
-| <a id="documents-thumbnail"></a>`documents.thumbnail(documentId)` | `GET /documents/{documentId}/thumbnail` | account | path/query only | native [`Response`](#unwrapped-json-pagination-raw-responses-and-void) |
-| <a id="documents-download-page"></a>`documents.downloadPage(documentId, pageId)` | `GET /documents/{documentId}/pages/{pageId}/download` | account | path/query only | native [`Response`](#unwrapped-json-pagination-raw-responses-and-void) |
-| <a id="documents-activities"></a>`documents.activities(documentId, query?)` | `GET /documents/{documentId}/activities` | account | `{ sort? }` | [`DocumentActivity[]`](#document-activity-response) |
+| <a id="documents-thumbnail"></a>`documents.thumbnail(documentId, query?)` | `GET /documents/{documentId}/thumbnail` | account | optional [`artifact: "certificated"`](#document-expansions-renders-and-guarded-creation) query | native [`Response`](#unwrapped-json-pagination-raw-responses-and-void) |
+| <a id="documents-download-page"></a>`documents.downloadPage(documentId, pageId, query?)` | `GET /documents/{documentId}/pages/{pageId}/download` | account | optional [`artifact: "certificated"`](#document-expansions-renders-and-guarded-creation) query | native [`Response`](#unwrapped-json-pagination-raw-responses-and-void) |
+| <a id="documents-activities"></a>`documents.activities(documentId, query?)` | `GET /documents/{documentId}/activities` | account | `{ sort?, page?, perPage? }` | [`DocumentActivity[]`](#document-activity-response) |
+| <a id="documents-activities-page"></a>`documents.activitiesPage(documentId, query?)` | `GET /documents/{documentId}/activities` | account | `{ sort?, page?, perPage? }` | `Page<DocumentActivity>`; same activity payload with pagination |
 | <a id="documents-verify"></a>`documents.verify(signatureHash)` | `GET /documents/{documentSignatureHash}/verify` | public | path/query only | [`DocumentVerificationResult`](#document-verification-response) |
 | <a id="documents-public-get"></a>`documents.publicGet(documentId)` | `GET /public/documents/{documentId}` | public | path/query only | [`Document \| PublicDocument`](#public-document-response) |
 | <a id="documents-send-public-token"></a>`documents.sendPublicToken(documentId, input)` | `PUT /public/documents/{documentId}/send-token` | public | [`SendPublicTokenInput`](#send-public-token-request) | [`SendPublicTokenResult`](#send-public-token-response) |
@@ -336,7 +340,7 @@ Document-tag operations take tag **IDs**, not tag names.
 | --- | --- | --- | --- | --- |
 | <a id="templates-list"></a>`templates.list(accountId, query?)` | `GET /accounts/{accountId}/templates` | account | [`ListTemplatesQuery`](#template-list-query) | [`Page<Template>`](#template-response) |
 | <a id="templates-get"></a>`templates.get(accountId, templateId)` | `GET /accounts/{accountId}/templates/{templateId}` (not in the published document — see [note](./API_COVERAGE.md#operation-outside-the-published-openapi-document)) | account | path/query only | [`Template`](#template-response) |
-| <a id="templates-instantiate"></a>`templates.instantiate(accountId, templateId, input)` | `POST /accounts/{accountId}/templates/{templateId}/documents` | account | [`CreateDocumentFromTemplateInput`](#instantiate-template-request) | [`Document`](#document-response) |
+| <a id="templates-instantiate"></a>`templates.instantiate(accountId, templateId, input, options?)` | `POST /accounts/{accountId}/templates/{templateId}/documents` | account | [`CreateDocumentFromTemplateInput`](#instantiate-template-request) | [`Document`](#document-response) |
 | <a id="templates-estimate-cost"></a>`templates.estimateCost(accountId, templateId, input)` | `POST /accounts/{accountId}/templates/{templateId}/documents/estimate-cost` | account | [`{ signers }`](#estimate-template-cost-request) | [`CostEstimate`](#cost-estimate-response) |
 
 ### Assignments
@@ -389,8 +393,8 @@ methods.
 | <a id="signature-verify"></a>`signature.verify(accessCode, verificationCode)` | `POST /verify` | signer code | [`verification-code`](#verify-otp-request) | [`void`](#unwrapped-json-pagination-raw-responses-and-void) |
 | <a id="signature-upload"></a>`signature.upload(accessCode, image, contentType?, reuse?)` or `signature.upload(accessCode, type, image, contentType?, reuse?)` | `POST /signature` | signer code | [raw image + query](#signature-upload-request) | [`void`](#unwrapped-json-pagination-raw-responses-and-void) |
 | <a id="signature-download"></a>`signature.download(accessCode, type)` | `GET /signature/{signatureType}` | signer code | path/query only | native [`Response`](#unwrapped-json-pagination-raw-responses-and-void) |
-| <a id="signature-sign-context"></a>`signature.signContext(accessCode, options?)` | `GET /sign` | signer code | [`has_accepted_terms`](#sign-context-query) | [`Document`](#document-response) |
-| <a id="signature-current-document"></a>`signature.currentDocument(signerId, accessCode)` | `GET /signers/{signerId}/document` | signer code | path/query only | [`Document`](#document-response) |
+| <a id="signature-sign-context"></a>`signature.signContext(accessCode, options?)` | `GET /sign` | signer code | [`hasAcceptedTerms`, `expand`, `document_id`](#sign-context-query) | [`SigningDocument`](#signer-branding-and-closed-access) |
+| <a id="signature-current-document"></a>`signature.currentDocument(signerId, accessCode, options?)` | `GET /signers/{signerId}/document` | signer code | optional [`expand: "envelope"`](#signer-branding-and-closed-access) query | [`SigningDocument`](#signer-branding-and-closed-access) |
 | <a id="signature-list-documents"></a>`signature.listDocuments(signerId, accessCode, query?)` | `GET /signers/{signerId}/documents` | signer code | [`ListSignerDocumentsQuery`](#document-list-query) | [`Page<Document>`](#document-response) |
 | <a id="signature-list-documents-as-workspace"></a>`signature.listDocumentsAsWorkspace(signerId, query?)` | `GET /signers/{signerId}/documents` | account (the signer must belong to the workspace) | [`ListSignerDocumentsQuery`](#document-list-query) | [`Page<Document>`](#document-response) |
 | <a id="signature-search-documents"></a>`signature.searchDocuments(signerId, accessCode, search?)` | `GET /signers/{signerId}/documents/search` | signer code | [`search`](#signer-document-search-query) | [`Page<Document>`](#document-response) |
@@ -418,7 +422,7 @@ methods.
 | <a id="webhooks-delete-endpoint"></a>`webhooks.deleteEndpoint(accountId, endpointId)` | `DELETE /accounts/{accountId}/webhooks/endpoints/{endpointId}` | account | path/query only | [`void`](#unwrapped-json-pagination-raw-responses-and-void) |
 | <a id="webhooks-delete-endpoint-by-url"></a>`webhooks.deleteEndpointByUrl(accountId, url)` | `DELETE /accounts/{accountId}/webhooks/endpoints` | account | [`url`](#delete-webhook-endpoint-by-url-request) | [`void`](#unwrapped-json-pagination-raw-responses-and-void) |
 | <a id="webhooks-get-endpoint-secret"></a>`webhooks.getEndpointSecret(accountId, endpointId)` | `GET /accounts/{accountId}/webhooks/endpoints/{endpointId}/secret` | account, not OAuth | path/query only | [`WebhookEndpointSecret`](#webhook-endpoint-secret-response) |
-| <a id="webhooks-rotate-endpoint-secret"></a>`webhooks.rotateEndpointSecret(accountId, endpointId)` | `POST /accounts/{accountId}/webhooks/endpoints/{endpointId}/secret/rotate` | account | path/query only | [`WebhookEndpointSecret`](#webhook-endpoint-secret-response) |
+| <a id="webhooks-rotate-endpoint-secret"></a>`webhooks.rotateEndpointSecret(accountId, endpointId, options?)` | `POST /accounts/{accountId}/webhooks/endpoints/{endpointId}/secret/rotate` | account | optional [`{ keep_previous }`](#webhook-rotation-overlap-and-test-delivery) body | [`WebhookEndpointSecret`](#webhook-rotation-overlap-and-test-delivery) |
 
 The sandbox returns `404` for deletion by URL, even for an existing endpoint;
 use `deleteEndpoint` by ID there. The identity-verification routes are currently
@@ -1190,19 +1194,17 @@ All fields are optional. The API normalizes `government_id`; CNPJ may include le
 
 #### Confirm signer data request
 
-Request body:
-
 ```json
 {
-  "full_name": "Example Signer",
   "email": "signer@example.test",
-  "government_id": "12345678909"
+  "whatsapp_phone_number": "+5511999999999",
+  "has_accepted_terms": true
 }
 ```
 
-Only these three fields are sent. `has_accepted_terms: true` in the SDK input
-makes the method call the dedicated `PUT /signers/accept-terms` operation right
-after the confirmation; the deprecated `whatsapp_phone_number` input is ignored.
+These are the only declared fields. The API confirms contact data and terms in
+one request. Legacy `full_name` and `government_id` inputs are deprecated and
+ignored; change the signer profile through workspace `signers.update`.
 
 #### Signer response
 
@@ -1240,7 +1242,7 @@ after the confirmation; the deprecated `whatsapp_phone_number` input is ignored.
 
 Assignment-facing signer fields such as `completed` and
 `notification_history` may be `null`. Each history entry contains `event`, a
-`sent`/`failed` status, nullable error details, and nullable sent/failed
+`sent`/`delivered`/`opened`/`failed` status, nullable error details, and nullable sent/failed
 timestamps as shown above.
 
 #### Signer self response
@@ -1296,6 +1298,7 @@ API may add statuses.
   "status": ["pending_signature", "certificated"],
   "method": "virtual",
   "search": "contract",
+  "envelope_id": "envelope1",
   "tags": ["tag_01J00000000000000000000000"],
   "sort": "updated_at",
   "page": 1,
@@ -1306,7 +1309,7 @@ API may add statuses.
 The SDK joins array-valued `status` and `tags` with commas and encodes
 `perPage` as `per-page`. The published sort fields are `name` and `updated_at`.
 `signature.listDocuments` and `listDocumentsAsWorkspace` accept the same object
-but send only `search`, `sort`, `page` and `per-page`; `status`, `method` and
+but send only `search`, `sort`, `envelope_id`, `page` and `per-page`; `status`, `method` and
 `tags` are not part of the signer-document operation and are ignored.
 
 #### Document search query
@@ -1314,6 +1317,7 @@ but send only `search`, `sort`, `page` and `per-page`; `status`, `method` and
 ```json
 {
   "search": "contract",
+  "envelope_id": "envelope1",
   "status": [
     "pending_signature",
     "certificated"
@@ -1363,8 +1367,8 @@ rejected before transport; the API enforces the 2,000-page limit.
 
 #### Document response
 
-This example contains every stable property represented by the SDK, including
-the nested assignment, item, page, signer, summary, and signing URL objects:
+This example includes the nested assignment, item, page, signer, summary, and
+signing URL objects; envelope fields appear only when requested through `expand`:
 
 ```json
 {
@@ -1504,7 +1508,8 @@ the nested assignment, item, page, signer, summary, and signing URL objects:
     "signing_urls": [
       {
         "signer_id": "sig_01J00000000000000000000000",
-        "url": "https://example.com/sign?signer-access-code=placeholder"
+        "url": "https://api.assinafy.com.br/v1/sign/doc_01J00000000000000000000000?email=signer@example.test",
+        "embedded": false
       }
     ],
     "completed_at": null,
@@ -1517,8 +1522,9 @@ the nested assignment, item, page, signer, summary, and signing URL objects:
 }
 ```
 
-List/search responses commonly omit `pages`, `current_signer`, and expanded
-`assignment`; `documents.get()` is the detail operation. Artifact keys and
+Document lists, signer document lists and `documents.get()` include `assignment`
+and `pages`; search responses omit both. `current_signer` belongs to the
+signer-facing context. Artifact keys and
 activity-specific properties can grow without an SDK release.
 
 #### Document activity response
@@ -1811,7 +1817,8 @@ properties.
       "id": "sig_01J00000000000000000000000",
       "step": 1,
       "verification_method": "Email",
-      "notification_methods": ["Email"]
+      "notification_methods": ["Email"],
+      "embedded": false
     }
   ],
   "editor_fields": [
@@ -1823,7 +1830,8 @@ properties.
   "name": "NDA - Example Signer.pdf",
   "message": "Please review and sign.",
   "expires_at": "2026-09-20T23:59:59Z",
-  "tags": ["Legal"]
+  "tags": ["Legal"],
+  "max_total_credits": 0
 }
 ```
 
@@ -1841,6 +1849,9 @@ An email binding may also supply `name` and `whatsapp_phone_number`:
 `tags` contains names; missing names are created and merged with template defaults.
 The published `editor_fields` form is the array shown above. A deprecated keyed
 object is converted to that array. Deprecated `full_name` is ignored; use `name`.
+The zero credit ceiling allows only creation whose computed credit cost is zero.
+Pass an optional fourth argument `{ idempotencyKey: "unique-attempt-key" }`
+to set `Idempotency-Key`; see the [creation rules](#document-expansions-renders-and-guarded-creation).
 
 #### Estimate template cost request
 
@@ -2206,12 +2217,14 @@ Virtual signature request:
       "id": "sig_01J00000000000000000000000",
       "step": 1,
       "verification_method": "Email",
-      "notification_methods": ["Email"]
+      "notification_methods": ["Email"],
+      "embedded": false
     }
   ],
   "message": "Please sign by Friday.",
   "expires_at": "2026-09-20T23:59:59Z",
-  "copy_receivers": ["sig_01J00000000000000000000001"]
+  "copy_receivers": ["sig_01J00000000000000000000001"],
+  "max_total_credits": 0
 }
 ```
 
@@ -2225,7 +2238,8 @@ Collect assignment with a positioned field:
       "id": "sig_01J00000000000000000000000",
       "step": 1,
       "verification_method": "Email",
-      "notification_methods": ["Email"]
+      "notification_methods": ["Email"],
+      "embedded": false
     }
   ],
   "entries": [
@@ -2250,7 +2264,8 @@ Collect assignment with a positioned field:
   ],
   "message": "Complete the field and sign.",
   "expires_at": "2026-09-20T23:59:59Z",
-  "copy_receivers": []
+  "copy_receivers": [],
+  "max_total_credits": 0
 }
 ```
 
@@ -2259,6 +2274,8 @@ to `signers: [{ id }]` and `expires_at` before the request is sent. Creation
 requires at least one signer from one of these sources. A `collect` assignment
 also requires at least one `entries` item; invalid inputs are rejected before
 transport. Each `copy_receivers` value is the ID of an existing signer record.
+The zero credit ceiling permits only a zero-credit assignment; estimate before
+setting a ceiling for paid verification or notification methods.
 
 `DigitalCertificate` signers require `method: "virtual"`. Their Web PKI flow
 completes a virtual signing item, while the ordinary signing endpoint refuses
@@ -2402,7 +2419,8 @@ Decline:
   "signing_urls": [
     {
       "signer_id": "sig_01J00000000000000000000000",
-      "url": "https://example.com/sign?signer-access-code=placeholder"
+      "url": "https://api.assinafy.com.br/v1/sign/doc_01J00000000000000000000000?email=signer@example.test",
+      "embedded": false
     }
   ],
   "completed_at": null,
@@ -2734,12 +2752,16 @@ format.
 
 ```json
 {
-  "hasAcceptedTerms": true
+  "hasAcceptedTerms": true,
+  "expand": "envelope",
+  "document_id": "doc_2"
 }
 ```
 
-The SDK encodes this property as `has_accepted_terms=true` alongside the signer
-access code. Calling `signContext()` marks the document as viewed. Do not use it
+The SDK encodes `hasAcceptedTerms` as `has_accepted_terms=true` alongside the signer
+access code; `expand` and `document_id` retain their names. All three options are
+optional. `document_id` selects another document in this signer's envelope.
+Calling `signContext()` marks the document as viewed. Do not use it
 as a side-effect-free readiness probe.
 
 The endpoint returns `409` while the document is still being prepared. The
@@ -2764,8 +2786,8 @@ async function loadSignContext(accessCode: string, attempts = 6) {
 For a signer whose verification method is `DigitalCertificate`, confirm the
 signer's data and accept the terms before calling `signContext()`; otherwise the
 endpoint returns `400`. `hasAcceptedTerms: true` on `signContext()` is too late
-to satisfy that precondition. Use `signers.confirmDataForDocument()` followed by
-`signature.acceptTerms()` first.
+to satisfy that precondition. Use `signers.confirmDataForDocument(documentId, accessCode, { has_accepted_terms: true })`
+first, or accept terms separately with `signature.acceptTerms()`.
 
 #### Signer document search query
 
@@ -2881,7 +2903,9 @@ ID remains available through `deleteEndpoint`.
 
 Both secret methods answer `400` when signing is disabled. Reading an existing
 secret is unavailable to OAuth applications. Rotation accepts OAuth with
-`webhooks:write`, returns the new secret once and takes effect immediately.
+`webhooks:write` and returns the new secret once. The old secret stops signing
+immediately unless [`keep_previous: true`](#webhook-rotation-overlap-and-test-delivery)
+retains it for 24 hours alongside the new secret.
 Creating an endpoint with signing enabled, or enabling signing on an existing
 endpoint, also returns a newly generated `secret` once; store it securely.
 
@@ -3446,8 +3470,8 @@ tool names. `runTool(tools, name, args)` finds and executes a tool or throws for
 an unknown name. Validation failures reject with `ConfigurationError` before any API request.
 
 `getEndpointSecret` and `rotateEndpointSecret` have no tool on purpose: a
-signing secret must not enter a model's context, and a rotation breaks the
-receiver immediately. Create/update webhook tools also remove `secret` from
+signing secret must not enter a model's context, and rotation requires updating
+the receiver's credentials. Create/update webhook tools also remove `secret` from
 their results; the REST resource retains it for secure receiver configuration.
 
 The full 41-tool catalog follows. Braces show argument keys; keys suffixed `?`
@@ -3530,3 +3554,794 @@ These helpers do not add HTTP operations: `documents.iterate()` and
 `auth.revokeApiKeys()` aliases `deleteApiKey()`; and `assignments.sign()` /
 `assignments.decline()` call the same two signer operations as the corresponding
 `signature` methods.
+
+<a id="embedded-signing"></a>
+
+## Embedded signing API
+
+`client.embedded` manages iframe origins and single-use signing sessions.
+Origin management requires the workspace's embedded-signing plan feature and
+is unavailable to OAuth applications; use a workspace API key or an authorized
+user's bearer token. Session creation uses workspace authentication. Exchange
+is public and sends no workspace credential: its token is the credential.
+
+| Method | HTTP request | Request body | SDK result |
+| --- | --- | --- | --- |
+| <a id="embedded-list-origins"></a>`embedded.listOrigins(accountId)` | `GET /accounts/{accountId}/embed-origins` | none | [`EmbedOrigin[]`](#embed-origin-response), oldest first |
+| <a id="embedded-create-origin"></a>`embedded.createOrigin(accountId, input)` | `POST /accounts/{accountId}/embed-origins` | [`EmbedOriginInput`](#embed-origin-request) | [`EmbedOrigin`](#embed-origin-response) |
+| <a id="embedded-update-origin"></a>`embedded.updateOrigin(accountId, originId, input)` | `PUT /accounts/{accountId}/embed-origins/{originId}` | [`EmbedOriginInput`](#embed-origin-request) | [`EmbedOrigin`](#embed-origin-response), same ID |
+| <a id="embedded-delete-origin"></a>`embedded.deleteOrigin(accountId, originId)` | `DELETE /accounts/{accountId}/embed-origins/{originId}` | none | `void`; the API's unwrapped body is `[]` |
+| <a id="embedded-create-session"></a>`embedded.createSession(documentId, assignmentId, signerId)` | `POST /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/embed-sessions` | none | [`EmbedSession`](#embed-session-response) |
+| <a id="embedded-exchange-session"></a>`embedded.exchangeSession(token, input?)` | `POST /embed/sessions/{token}/exchange` | optional [`ExchangeEmbedSessionInput`](#embed-session-exchange-request) | [`EmbedSessionExchange`](#embed-session-exchange-response) |
+
+### Embed origin request
+
+Both create and update accept exactly this body:
+
+```json
+{
+  "origin": "https://app.example.com"
+}
+```
+
+An origin is an exact `scheme://host[:port]`, with HTTPS required except for
+HTTP on `localhost` and `127.0.0.1`. Paths, queries, fragments, credentials and
+wildcards are forbidden. The API lowercases the host and drops a trailing slash
+and default port. It permits at most ten origins. Invalid, duplicate or excess
+origins return `400`; a plan without the feature returns `403 PlanRestricted`.
+Update and delete return `404` for an unknown origin. Removing the last origin
+prevents session creation with `409 embed_origins_missing`.
+
+### Embed origin response
+
+Create and update return this object; list returns an array of these objects:
+
+```json
+{
+  "id": "origin1",
+  "origin": "https://app.example.com",
+  "created_at": "2026-11-11T12:00:00Z"
+}
+```
+
+Deletion consumes the API's `[]` response and resolves `undefined`.
+
+### Embed session response
+
+Create the assignment or envelope with `embedded: true` on the intended
+signer. Their `signing_urls` entry has `url: null`; obtain a session on the
+server and load its URL unchanged in an iframe on an allowed origin:
+
+```json
+{
+  "url": "https://app.example.com/embed/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "expires_at": "2026-11-11T12:05:00Z"
+}
+```
+
+The example host is a placeholder: load the actual returned Assinafy URL.
+The URL expires in five minutes and opening it consumes its token. Mint a new
+session each time the signer opens the page. Creation never returns the signer
+access code. Keep these URLs out of logs, browser storage and model tools.
+
+Creation returns `400 embed_not_enabled_for_signer` for a non-embedded signer;
+`409 already_signed`, `document_not_ready`, `document_unavailable` or
+`embed_origins_missing` when signing cannot start; `403 PlanRestricted` for an
+unavailable feature; and `429` after 30 sessions for one signer in an hour.
+Wait for metadata processing before manually requesting another session after
+`document_not_ready`. The SDK never automatically retries this POST.
+
+### Embed session exchange request
+
+Assinafy's embed page exchanges the token; integrations normally load the
+session URL instead of exchanging it themselves. The optional body is:
+
+```json
+{
+  "parent_origin": "https://app.example.com"
+}
+```
+
+Omitting `input` sends no request body. Blank tokens reject with
+`ConfigurationError` before a request. Exchange uses no API key or bearer
+header, even on a configured workspace client.
+
+### Embed session exchange response
+
+```json
+{
+  "signer_access_code": "example-access-code",
+  "signer_id": "signer1",
+  "document_id": "document1",
+  "verification_method": "Email",
+  "embed_origins": ["https://app.example.com"]
+}
+```
+
+The code is a bearer credential for the embed page. Exchange spends the token
+even on `409` when the signer or document cannot sign. Unknown, expired and
+already-used tokens return `410 embed_session_invalid`. Never retry an exchange
+or expose its result through default LLM tools. The transport redacts the token
+in error paths.
+
+<a id="envelopes"></a>
+
+## Envelopes API
+
+`client.envelopes` sends documents together while preserving each document's
+assignment, status, certificate and downloads. Reads require OAuth
+`documents:read`; mutations and estimates require `documents:write`. A workspace
+API key is also accepted. Creation, estimates and adding documents require the
+Envelopes plan feature and the selected signing-method features; unavailable
+features return `403 PlanRestricted`. Missing OAuth scope returns
+`403 InsufficientScope`.
+
+| Method | HTTP request | Request | SDK result |
+| --- | --- | --- | --- |
+| <a id="envelopes-list"></a>`envelopes.list(accountId, query?)` | `GET /accounts/{accountId}/envelopes` | [`ListEnvelopesQuery`](#envelope-list-request); no body | [`Page<DocumentEnvelope>`](#envelope-list-response) |
+| <a id="envelopes-create"></a>`envelopes.create(accountId, input, options?)` | `POST /accounts/{accountId}/envelopes` | [`CreateEnvelopeInput`](#envelope-create-request); optional `options.idempotencyKey` header | [`DocumentEnvelope`](#envelope-response) |
+| <a id="envelopes-estimate-cost"></a>`envelopes.estimateCost(accountId, input)` | `POST /accounts/{accountId}/envelopes/estimate-cost` | [`CreateEnvelopeInput`](#envelope-create-request) | [`CostEstimate`](#envelope-cost-response) |
+| <a id="envelopes-get"></a>`envelopes.get(accountId, envelopeId)` | `GET /accounts/{accountId}/envelopes/{envelopeId}` | no body | [`DocumentEnvelope`](#envelope-response) |
+| <a id="envelopes-remove"></a>`envelopes.remove(accountId, envelopeId)` | `DELETE /accounts/{accountId}/envelopes/{envelopeId}` | no body; envelope must be closed | `void`; API body `[]` |
+| <a id="envelopes-update"></a>`envelopes.update(accountId, envelopeId, input)` | `PATCH /accounts/{accountId}/envelopes/{envelopeId}` | [`UpdateEnvelopeInput`](#envelope-update-request) | [`DocumentEnvelope`](#envelope-response) |
+| <a id="envelopes-activities"></a>`envelopes.activities(accountId, envelopeId, query?)` | `GET /accounts/{accountId}/envelopes/{envelopeId}/activities` | optional `{ sort, page, perPage }`; no body | [`Page<EnvelopeActivity>`](#envelope-activity-response) |
+| <a id="envelopes-download"></a>`envelopes.download(accountId, envelopeId, artifactName)` | `GET /accounts/{accountId}/envelopes/{envelopeId}/download/{artifactName}` | artifact name; no body | raw ZIP [`Response`](#envelope-download-response) |
+| <a id="envelopes-cancel"></a>`envelopes.cancel(accountId, envelopeId)` | `PUT /accounts/{accountId}/envelopes/{envelopeId}/cancel` | no body | [`EnvelopeCancellationResult[]`](#envelope-cancellation-response) |
+| <a id="envelopes-resend-to-signer"></a>`envelopes.resendToSigner(accountId, envelopeId, signerId)` | `PUT /accounts/{accountId}/envelopes/{envelopeId}/signers/{signerId}/resend` | no body | [`EnvelopeResendResult`](#envelope-resend-response) |
+| <a id="envelopes-add-document"></a>`envelopes.addDocument(accountId, envelopeId, input)` | `POST /accounts/{accountId}/envelopes/{envelopeId}/documents` | [`AddEnvelopeDocumentInput`](#envelope-add-document-request) | [`DocumentEnvelope`](#envelope-response), with the document last |
+| <a id="envelopes-remove-document"></a>`envelopes.removeDocument(accountId, envelopeId, documentId)` | `DELETE /accounts/{accountId}/envelopes/{envelopeId}/documents/{documentId}` | no body; document must be cancellable | [`DocumentEnvelope`](#envelope-response), without that document |
+
+### Envelope list request
+
+```json
+{
+  "search": "Service agreement",
+  "status": "open",
+  "page": 1,
+  "perPage": 20
+}
+```
+
+The SDK sends these as query parameters (`perPage` becomes `per-page`). Status
+is `open` when any document remains open, or `closed` when all are signed,
+declined, cancelled, expired or failed. Results are newest first. Pagination
+requires positive integers; the SDK accepts up to 100, while this API caps
+the returned page at 50.
+
+### Envelope create request
+
+Upload and wait for every document to become `metadata_ready`, create or reuse
+the signers, estimate this body, then create with a credit ceiling and a unique
+idempotency key. Each signer must belong to the workspace and appear on at
+least one document; every document must have no existing assignment.
+
+```json
+{
+  "name": "Service agreement",
+  "message": "Please sign the agreement and its attachment.",
+  "max_total_credits": 1.5,
+  "signers": [
+    {
+      "id": "signer1",
+      "verification_method": "Email",
+      "notification_methods": ["Email"],
+      "embedded": false
+    }
+  ],
+  "documents": [
+    {
+      "id": "document1",
+      "method": "virtual",
+      "signer_ids": ["signer1"],
+      "expires_at": "2027-12-31T23:59:59Z",
+      "copy_receiver_ids": []
+    }
+  ]
+}
+```
+
+The name is 1–255 characters and cannot contain `<`. The message may be null.
+Limits are 1–20 signers, 1–20 documents, 2,000 placed fields in total (one per
+signer on virtual documents) and 100 copy receivers in total. Signers have no
+`step`: they sign concurrently. Methods are `Email`, `Whatsapp`,
+`DigitalCertificate` and `IdDocumentFaceMatchBasic`, with one corresponding
+notification method, inferred when omitted. Digital-certificate signers must
+be alone on each of their virtual documents. Their signatures are charged per
+document; biometric checks and notifications are charged once per signer for
+the envelope. The envelope consumes one document allowance, regardless of its
+document count. Embedded signing is limited to supported non-certificate,
+non-biometric verification; its response link is null.
+
+For `collect`, supply `entries` as in the complete
+[add-document request](#envelope-add-document-request); `signer_ids` must match
+exactly the signers assigned to its fields. Expiration accepts ISO 8601 or Unix
+seconds and must be at least one hour ahead. Null, zero, empty text or omission
+means no expiration. A date alone ends at 23:59 UTC that day.
+
+```ts
+const estimate = await client.envelopes.estimateCost(accountId, input);
+if (!estimate.has_sufficient_resources) throw new Error(estimate.message ?? "Insufficient resources");
+const envelope = await client.envelopes.create(accountId, {
+  ...input,
+  max_total_credits: estimate.total_credits,
+}, { idempotencyKey: crypto.randomUUID() });
+```
+
+Keep the key with the intended operation. It is case-sensitive, belongs to the
+workspace and does not expire. After a lost response, a manual repeat using
+that key returns the original envelope regardless of the new body; concurrent
+use returns `409 IdempotencyKeyInUse`. An empty key means no key. The SDK never
+retries mutations automatically. Deleting the envelope removes its retrievable
+idempotency result; do not reuse that key for a new envelope.
+
+Creation sends one invitation per signer for their documents. `200` confirms
+creation, not delivery; failed sends remain in `notification_history`.
+Validation failures create and charge nothing. A cost above
+`max_total_credits` returns `409 CreditCeilingExceeded`, also without creating
+or charging. Estimates validate the creation body with the ceiling ignored,
+without creating records, charging credits or sending invitations. Resource
+state and balances can change after the estimate; still check creation errors.
+
+### Envelope response
+
+Get, create, update, add-document and remove-document return this complete
+shape, reflecting the operation's resulting names, ordering and membership:
+
+```json
+{
+  "resource": "envelope",
+  "id": "envelope1",
+  "name": "Service agreement",
+  "message": "Please sign the agreement and its attachment.",
+  "documents": [
+    {
+      "id": "document1",
+      "position": 1,
+      "name": "agreement.pdf",
+      "status": "pending_signature",
+      "artifacts": {
+        "original": "https://api.assinafy.com.br/v1/documents/document1/download/original",
+        "thumbnail": "https://api.assinafy.com.br/v1/documents/document1/thumbnail"
+      },
+      "signers": [
+        {
+          "id": "signer1",
+          "full_name": "Example Signer",
+          "email": "signer@example.test",
+          "whatsapp_phone_number": null,
+          "completed": false,
+          "signed_at": null
+        }
+      ]
+    }
+  ],
+  "counts": { "pending_signature": 1 },
+  "signing_urls": [
+    { "signer_id": "signer1", "url": "https://api.assinafy.com.br/v1/sign/document1?email=signer@example.test", "embedded": false }
+  ],
+  "created_at": "2026-11-11T12:00:00Z"
+}
+```
+
+An envelope has no status of its own. `counts` is null when it has no remaining
+documents. `message`, signer contact fields and `signed_at` can be null. An
+embedded or WhatsApp-only signer has `url: null`; an email URL opens a page
+where the signer requests their invitation, and does not itself open the
+document. Each signer's invitation link opens their documents in the envelope.
+Treat any returned credential-bearing links as secrets.
+
+Certified documents add `certificated`, `certificate-page`, `bundle` and,
+where applicable, `pades` artifacts. List responses include only `thumbnail`,
+whose URL may return `404` until generation finishes. The `resource` field is
+present on single-resource responses.
+
+### Envelope list response
+
+```json
+{
+  "data": [
+    {
+      "id": "envelope1",
+      "name": "Service agreement",
+      "message": null,
+      "documents": [
+        {
+          "id": "document1",
+          "position": 1,
+          "name": "agreement.pdf",
+          "status": "pending_signature",
+          "artifacts": { "thumbnail": "https://api.assinafy.com.br/v1/documents/document1/thumbnail" },
+          "signers": [
+            { "id": "signer1", "full_name": "Example Signer", "email": "signer@example.test", "whatsapp_phone_number": null, "completed": false, "signed_at": null }
+          ]
+        }
+      ],
+      "counts": { "pending_signature": 1 },
+      "signing_urls": [
+        { "signer_id": "signer1", "url": null, "embedded": true }
+      ],
+      "created_at": "2026-11-11T12:00:00Z"
+    }
+  ],
+  "pagination": { "currentPage": 1, "pageCount": 1, "perPage": 20, "totalCount": 1 }
+}
+```
+
+### Envelope cost response
+
+```json
+{
+  "documents": 1,
+  "credits": 0,
+  "needs_extra_document": false,
+  "extra_document_cost": 1,
+  "total_credits": 0,
+  "breakdown": [],
+  "document_balance": 10,
+  "credit_balance": 10,
+  "has_sufficient_resources": true,
+  "blocking_reason": null,
+  "message": null
+}
+```
+
+Balances can be null for unlimited resources. `credits` sums the notification,
+identity and certificate breakdown; `total_credits` additionally includes the
+extra document cost when the document allowance is exhausted. Blocking reasons
+are `PendingPayment`, `InsufficientDocuments` or `InsufficientCredits`.
+Use the returned figures rather than fixed prices.
+
+### Envelope update request
+
+```json
+{
+  "name": "Updated service agreement",
+  "message": null,
+  "document_ids": ["document1"]
+}
+```
+
+Send only changed fields. If supplied, `document_ids` contains every current
+document exactly once in the desired order. Update works on closed envelopes
+and sends nothing. Future notices use the new name, message and order; the
+message also updates each document assignment. Result:
+[`DocumentEnvelope`](#envelope-response), with the requested changes.
+
+### Envelope activity response
+
+Query example: `{ sort: "-id", page: 1, perPage: 20 }`. `-id` is newest first
+and is the default; `id` is oldest first. The trail includes documents taken
+out of the envelope, but not deleted documents. A page beyond the end is empty.
+
+```json
+{
+  "data": [
+    {
+      "id": 1,
+      "event": "document_uploaded",
+      "message": "Document uploaded.",
+      "payload": [],
+      "origin": null,
+      "created_at": "2026-11-11T12:00:00Z",
+      "document_id": "document1",
+      "document_name": "agreement.pdf"
+    }
+  ],
+  "pagination": { "currentPage": 1, "pageCount": 1, "perPage": 20, "totalCount": 1 }
+}
+```
+
+### Envelope download response
+
+`artifactName` is `original`, `certificated`, `certificate-page`, `pades` or
+`bundle`. The response is a raw ZIP, not JSON:
+
+```ts
+const response = await client.envelopes.download(accountId, envelopeId, "original");
+const zip = await response.arrayBuffer();
+```
+
+Files follow envelope order and use names such as `1 - agreement.pdf`.
+`bundle` gives each document a folder. Certified artifacts include only
+completed documents, and `pades` only those with that artifact. When none is
+available the API returns `404`.
+
+### Envelope cancellation response
+
+Cancel takes no body and notifies owners, signers and copy receivers of each
+document it cancels. Closed, fully signed or certificating documents remain
+unchanged; a failed notice does not stop the others. Repeating cancellation is
+safe at the API, but the transport does not automatically retry the PUT.
+
+```json
+[
+  { "id": "document1", "status": "rejected_by_user", "cancelled": true },
+  { "id": "document2", "status": "certificated", "cancelled": false }
+]
+```
+
+`remove` requires every document to be closed; otherwise it returns
+`409 EnvelopeOpen`. Its successful API body is `[]` and the SDK resolves
+`undefined`. Documents and their certificates remain as ordinary documents;
+their expanded `envelope_id` becomes null.
+
+### Envelope resend response
+
+Resend takes no body and sends one reminder for the signer's whole envelope,
+listing outstanding documents and, for email, already-signed documents. Paid
+channels are charged for each message sent. Check `is_sent` for delivery success.
+
+```json
+{
+  "is_sent": true,
+  "envelope_id": "envelope1",
+  "signer_id": "signer1"
+}
+```
+
+A signer with nothing left to sign, or insufficient credits, returns `400`.
+A closed envelope returns `409 EnvelopeClosed`; an unknown envelope or signer
+returns `404`. This operation is not retried automatically.
+
+### Envelope add-document request
+
+```json
+{
+  "id": "document2",
+  "method": "collect",
+  "signer_ids": ["signer1"],
+  "entries": [
+    {
+      "page_id": "page1",
+      "fields": [
+        {
+          "signer_id": "signer1",
+          "field_id": "field1",
+          "display_settings": {
+            "left": 20,
+            "top": 40,
+            "width": 200,
+            "height": 60,
+            "fontSize": 12,
+            "fontFamily": "Arial",
+            "backgroundColor": "#ffffff"
+          }
+        }
+      ]
+    }
+  ],
+  "expires_at": "2027-12-31T23:59:59Z",
+  "copy_receiver_ids": [],
+  "max_total_credits": 0
+}
+```
+
+The document must be ready and unassigned and the envelope open. Only existing
+envelope signers can be used; the document is appended and their invitations
+are sent again. Only the new document's certificate signatures are charged.
+Limits remain 20 documents, 2,000 fields and 100 copy receivers. An approved
+envelope identity check also applies to the new document. Closed envelopes
+return `409 EnvelopeClosed`; costs above the ceiling return
+`409 CreditCeilingExceeded` without creating or charging. The result is the
+full [`DocumentEnvelope`](#envelope-response) with the appended document.
+
+`removeDocument` takes no body, cancels the selected open document, notifies its
+participants and returns the full envelope without it. Other documents keep
+their progress. A closed, fully signed or certificating document returns
+`409 DocumentClosed`; absent or previously removed documents return `404`.
+An invitation sent from a removed document still opens the remaining envelope,
+so that document cannot be deleted independently until the envelope closes
+(`409 EnvelopeOpen`). Read the envelope and download its artifacts as signatures
+finish, then remove the envelope only when every document is closed.
+
+
+## Workspace settings, signer branding and certified copies
+
+| SDK method | HTTP operation | Auth | Request | SDK response |
+| --- | --- | --- | --- | --- |
+| <a id="accounts-get-usage"></a>`accounts.getUsage(accountId)` | `GET /accounts/{accountId}/usage` | account | No body | `AccountUsage`; payloads below |
+| <a id="accounts-get-notification-policy"></a>`accounts.getNotificationPolicy(accountId)` | `GET /accounts/{accountId}/notification-policy` | account | No body | `NotificationPolicy`; payloads below |
+| <a id="accounts-update-notification-policy"></a>`accounts.updateNotificationPolicy(accountId, input)` | `PUT /accounts/{accountId}/notification-policy` | account | UpdateNotificationPolicyInput | `NotificationPolicy`; payloads below |
+| <a id="users-get-push-preferences"></a>`users.getPushPreferences()` | `GET /users/self/push-preferences` | account | No body | `PushPreferences`; payloads below |
+| <a id="users-update-push-preferences"></a>`users.updatePushPreferences(preferences)` | `PUT /users/self/push-preferences` | account | Partial<PushPreferences> | `PushPreferences`; payloads below |
+| <a id="signature-get-theme"></a>`signature.getTheme(accessCode)` | `GET /sign/theme` | signer code | signer-access-code query | `AccountTheme`; payloads below |
+| <a id="signature-download-logo"></a>`signature.downloadLogo(accessCode)` | `GET /sign/logo` | signer code | signer-access-code query | `Response (image)`; payloads below |
+| <a id="signature-send-certified-copy"></a>`signature.sendCertifiedCopy(accessCode, input?)` | `POST /sign/certified-copy` | signer code | optional document_id; signer-access-code query | `CertifiedCopyResult`; payloads below |
+| <a id="signature-download-certified-copy"></a>`signature.downloadCertifiedCopy(token, artifact?)` | `GET /signers/downloads/{token}` | public | optional pades path suffix | `Response (PDF)`; payloads below |
+| <a id="signature-resend-certified-copy"></a>`signature.resendCertifiedCopy(token)` | `POST /signers/downloads/{token}/resend` | public | No body | `CertifiedCopyResult`; payloads below |
+| <a id="webhooks-test-endpoint"></a>`webhooks.testEndpoint(accountId, endpointId)` | `POST /accounts/{accountId}/webhooks/endpoints/{endpointId}/test` | account | No body | `WebhookDispatch`; payloads below |
+
+### Workspace features and usage
+
+`accounts.get(accountId, { expand: "signing_features" })` adds this object to
+[Account](#account-response); absent features are not inferred from a plan name:
+
+```json
+{
+  "DigitalCertificate": true,
+  "VerificationIdDocumentFaceMatchBasic": true,
+  "WhatsappNotification": true,
+  "VerificationBypass": false,
+  "Embed": true
+}
+```
+
+`accounts.getUsage` returns plan name, renewal date and remaining balances, with
+no prices or payment details. Null balances/limits mean unlimited; a null renewal
+date means no established cycle. Third-party OAuth applications receive 403.
+
+```json
+{
+  "plan": "Pro",
+  "documents_renewal_date": "2026-12-01",
+  "balances": {
+    "documents": { "balance": 100, "limit": 100, "spent": 0 },
+    "credits": { "balance": 20, "limit": null, "spent": 0 }
+  }
+}
+```
+
+### Workspace notification policy
+
+Read returns the complete policy. Only owners may update it; `editable` reports
+that permission. Third-party OAuth cannot read or change this policy. An event
+set to false suppresses the workspace's alerts across channels, except identity
+review e-mail, which is always sent. `owners_receive_all` extends document push
+alerts to owners, still subject to each owner's preferences.
+
+Update request (only sent keys change):
+
+```json
+{ "owners_receive_all": false, "events": { "SignerViewed": false } }
+```
+
+Read/update response:
+
+```json
+{
+  "editable": true,
+  "owners_receive_all": false,
+  "events": {
+    "DocumentCompleted": true,
+    "SignerDeclined": true,
+    "DocumentCancelled": true,
+    "DocumentAboutToExpire": true,
+    "DocumentExpired": true,
+    "DocumentExpirationReset": true,
+    "DocumentProcessingFailed": true,
+    "TemplateProcessingFailed": true,
+    "SignerWhatsappFailed": true,
+    "ContractRenewalNotice": true,
+    "ContractExpiring": true,
+    "ContractExpired": true,
+    "ContractRenewed": true,
+    "SignerViewed": false,
+    "SignerSigned": true,
+    "SignerIdentityReviewRequired": true
+  }
+}
+```
+
+Empty updates, unknown event keys and non-boolean values receive 400 atomically.
+Omitted event keys keep their values.
+
+### Personal push preferences
+
+Push settings are independent of e-mail and apply to the user's phones across
+workspaces. Third-party OAuth cannot access them. Update takes a partial map:
+
+```json
+{ "SignerViewed": false, "SignerSigned": true }
+```
+
+Read/update response (all keys are returned):
+
+```json
+{
+  "SignerViewed": false,
+  "SignerSigned": true,
+  "DocumentCompleted": true,
+  "SignerDeclined": true,
+  "DocumentAboutToExpire": true,
+  "DocumentExpired": true,
+  "SignerIdentityReviewRequired": true,
+  "SignerWhatsappFailed": true
+}
+```
+
+### Signer branding and closed access
+
+`signature.getTheme` takes only the signer code and returns:
+
+```json
+{
+  "account_name": "Example workspace",
+  "primary_color": "aabbcc",
+  "secondary_color": "ffffff",
+  "logo": "https://api.assinafy.com.br/v1/sign/logo"
+}
+```
+
+`logo` is null when absent. Use `downloadLogo(accessCode)` for the raw image;
+no image answers 404. Both are available before verification and after deletion.
+The theme's logo URL contains no code; never fetch it with workspace credentials.
+
+`signContext(accessCode, { expand: "envelope", document_id: "doc_2" })` selects
+another document of the same envelope for this signer, carrying Email/WhatsApp
+verification once. `currentDocument` also accepts `{ expand: "envelope" }`.
+`listDocuments` and `listDocumentsAsWorkspace` accept `{ envelope_id: "env_1" }`.
+Once an access code closes, `signContext` and `currentDocument` return this compact `SigningDocument`:
+
+```json
+{
+  "id": "doc_1",
+  "name": "Agreement.pdf",
+  "status": "certificated",
+  "current_signer": {
+    "id": "signer_1",
+    "verification_method": "Email",
+    "notification_methods": ["Email"],
+    "completed": true
+  },
+  "is_signer_access_closed": true,
+  "certified_copy": {
+    "available": true,
+    "notification_method": "Email",
+    "resends_left": null
+  },
+  "envelope": { "id": "env_1", "name": "Agreement" }
+}
+```
+
+Open codes additionally carry the ordinary [document fields](#document-response).
+Their assignment contains only the current signer's items and omits `summary`,
+`signers`, `copy_receivers` and `signing_urls`.
+Check optional fields before reading artifacts or workspace data. `envelope` is
+only included when requested and may be null. `current_signer.notification_methods`
+and `certified_copy.notification_method` can be null on old or unnotified requests.
+
+### Certified-copy delivery and download
+
+`sendCertifiedCopy` takes the signer access code, including a closed code, and
+an optional body selecting a document from the same envelope:
+
+```json
+{ "document_id": "doc_2" }
+```
+
+`resendCertifiedCopy` takes the bearer token from an expired download link and
+has no body. Both send only to the contact recorded during signing, never a new
+recipient. Their response is:
+
+```json
+{
+  "available": true,
+  "notification_method": "Email",
+  "resends_left": null,
+  "sent_to": "s***@example.test"
+}
+```
+
+Email resends are limited to one per two minutes and ten per 24 hours; WhatsApp
+permits one resend per request. 409 means the copy cannot be sent, 429 means the
+limit was reached. New links last 30 minutes; original completion links last
+seven days. `downloadCertifiedCopy(token)` returns a raw PDF; pass `"pades"` as
+the second argument for the certificate artifact. An expired/unknown download
+returns 302, surfaced as `ApiError`: redirects are not followed. A missing PAdES
+artifact returns 404. Tokens are required, redacted in error paths, and never
+sent with workspace credentials. No delivery mutation is retried automatically.
+
+### Webhook rotation overlap and test delivery
+
+`rotateEndpointSecret(accountId, endpointId, { keep_previous: true })` request:
+
+```json
+{ "keep_previous": true }
+```
+
+Response:
+
+```json
+{
+  "secret": "whsec_ZXhhbXBsZS1zZWNyZXQ=",
+  "previous_secret_expires_at": "2026-11-12T15:00:00Z"
+}
+```
+
+Omitting/setting false invalidates the old secret immediately. With true, both
+sign for 24 hours. A second rotation replaces the previously retained secret.
+Store the response securely; this method needs `webhooks:write` with OAuth.
+`testEndpoint` sends one `webhook_test` event even to paused/inactive endpoints;
+it neither resumes delivery nor counts toward a pause. It takes no body and
+returns the complete attempt:
+
+```json
+{
+  "resource": "activity_dispatching_history",
+  "id": "dispatch_1",
+  "event": "webhook_test",
+  "activity_id": 1,
+  "endpoint_id": "endpoint_1",
+  "endpoint": "https://example.test/webhook",
+  "payload": {
+    "id": 1,
+    "event": "webhook_test",
+    "message": "Webhook test",
+    "payload": null,
+    "origin": null,
+    "created_at": 1794412800,
+    "subject": { "id": "endpoint_1", "name": "Example", "url": "https://example.test/webhook", "events": [], "is_active": false },
+    "object": { "id": "endpoint_1", "name": "Example", "url": "https://example.test/webhook", "events": [], "is_active": false },
+    "account_id": "account_1"
+  },
+  "delivered": true,
+  "webhook_id": "delivery_1",
+  "attempt": 1,
+  "kind": "manual",
+  "will_retry": false,
+  "duration_ms": 184,
+  "http_status": 200,
+  "response_body": "OK",
+  "error": null,
+  "created_at": "2026-11-11T15:00:00Z",
+  "updated_at": "2026-11-11T15:00:00Z"
+}
+```
+
+`duration_ms` is nullable when no request was sent or on older history. Manual
+tests permit ten per user per ten minutes and need `webhooks:write`. This event
+cannot be subscribed to, carries no secret, and is not in the event catalog.
+
+
+### Document expansions, renders and guarded creation
+
+Document list/search accept `envelope_id`. `documents.get` accepts
+`{ expand: ["envelope_id", "envelope"] }`; only requested expansions are returned.
+`contracts.related(accountId, documentId, { expand: "document" })` includes the
+root document. `thumbnail(documentId, { artifact: "certificated" })` and
+`downloadPage(documentId, pageId, { artifact: "certificated" })` select a rendered
+artifact for workspace callers. Signed rendering may return 503 with
+`Retry-After` while preparation runs; it does not render certificate pages or
+the PAdES seal. `activitiesPage` accepts page/perPage/sort and returns pagination;
+`activities` retains its array return type for existing callers.
+
+Assignments and template creation accept `max_total_credits`; a higher computed
+cost returns 409 without charging or creating. Their signer entries accept
+`embedded: true`; only Email/WhatsApp verification can be embedded. Omitted and
+false values are preserved. Template creation accepts a fourth options argument
+`{ idempotencyKey: "unique-attempt-key" }` sent as `Idempotency-Key`. A template
+key belongs to that template; an envelope key belongs to its workspace. Reusing
+a key returns the original resource, regardless of the changed request body;
+a deleted template document returns 404 and a failed template document remains
+bound. Deleting an envelope removes its former idempotency result; use a fresh
+key for every new envelope.
+Use a fresh key for each intentionally new creation. Mutations still never retry automatically. See the
+[envelope idempotency rules](#envelopes) before deciding to retry a keyed creation.
+
+Assignment `signing_urls` entries include `embedded` and a nullable `url`.
+WhatsApp-only and embedded signers have no usable link there; do not construct
+`new URL` until the value is non-null. Cost-estimate document/credit balances may
+be null for unlimited resources. Notification history statuses also include
+`delivered` and `opened`.
+
+
+The `create_assignment` and `instantiate_template` AI tools accept optional
+`max_total_credits` (a finite number greater than or equal to zero), and forward
+zero unchanged to prevent an unintended paid request. Their shared signer schema
+permits at most one notification channel. For example, the assignment tool input:
+
+```json
+{
+  "documentId": "doc_1",
+  "method": "virtual",
+  "signers": [{ "id": "signer_1", "verification_method": "Email", "notification_methods": ["Email"] }],
+  "max_total_credits": 0
+}
+```
+
+returns the normal [assignment response](#assignment-response). Template tool
+input uses `accountId`, `templateId` and the usual role bindings plus the same
+ceiling; its result is the normal [document response](#document-response).
+
+Certificate assignment estimates default to `virtual` when `method` is omitted.
+Explicit `collect` certificate requests reject before fetch.

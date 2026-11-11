@@ -5,6 +5,7 @@
 
 import { ConfigurationError } from "./errors.js";
 import { withQuery, type HttpClient } from "./http.js";
+import type { AssignmentEntryInput } from "./types.js";
 
 /**
  * Join an array of string values with `,` for query-parameter use, or pass a
@@ -79,4 +80,18 @@ export function signerTransport(http: HttpClient): HttpClient {
 /** Credential-free copy of the transport for public API operations. */
 export function anonymousTransport(http: HttpClient): HttpClient {
   return http.fork({ auth: { kind: "none" } });
+}
+
+/** Keep only declared page placements for assignments and envelope documents. */
+export function collectEntries(entries: AssignmentEntryInput[] | undefined): AssignmentEntryInput[] | undefined {
+  return entries == null ? entries : entries.map(({ page_id, fields }) => ({
+    page_id,
+    fields: fields == null ? fields : fields.map(({ signer_id, field_id, display_settings }) => {
+      if (display_settings != null) {
+        const { left, top, width, height, fontSize, fontFamily, backgroundColor } = display_settings;
+        display_settings = { left, top, width, height, fontSize, fontFamily, backgroundColor };
+      }
+      return { signer_id, field_id, display_settings };
+    }),
+  }));
 }

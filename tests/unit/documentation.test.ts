@@ -7,6 +7,8 @@ const RESOURCE_NAMES = [
   "auth",
   "contracts",
   "documents",
+  "envelopes",
+  "embedded",
   "fields",
   "oauth",
   "signature",
@@ -72,6 +74,15 @@ describe("published documentation", () => {
     const operationLinks = [...coverage.matchAll(/API_REFERENCE\.md#([a-z0-9-]+)/g)].map((match) => match[1]!);
     expect(operationLinks.length).toBeGreaterThanOrEqual(93 * 2);
     expect([...new Set(operationLinks.filter((anchor) => !anchors.has(anchor)))]).toEqual([]);
+
+    for (const path of ["README.md", "README.en.md", "docs/API_REFERENCE.md"]) {
+      const document = await readFile(new URL(`../../${path}`, import.meta.url), "utf8");
+      const links = path === "docs/API_REFERENCE.md"
+        ? document.matchAll(/\]\(#([a-z0-9-]+)\)/g)
+        : document.matchAll(/\]\((?:\.\/)?docs\/API_REFERENCE\.md#([a-z0-9-]+)\)/g);
+      for (const link of links) expect(anchors.has(link[1]!), `${path}: #${link[1]}`).toBe(true);
+      if (path === "README.md") expect(document.trimEnd().split("\n").length).toBeLessThan(200);
+    }
 
     const jsonBlocks = [...reference.matchAll(/```json\n([\s\S]*?)\n```/g)].map((match) => match[1]!);
     expect(jsonBlocks.length).toBeGreaterThan(70);

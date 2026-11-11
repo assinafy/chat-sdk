@@ -35,7 +35,7 @@ export interface HttpClientOptions {
   /**
    * Number of times to retry safe reads after transient failures (HTTP 408,
    * 425, 429, 500, 502, 503, 504, plus network errors). Mutating requests are
-   * never retried because the API has no idempotency-key contract. Defaults to
+   * never retried automatically, including operations accepting idempotency keys. Defaults to
    * 2 (so up to 3 total attempts).
    */
   maxRetries?: number;
@@ -75,7 +75,7 @@ export interface ResponseWithMeta<T> {
  * User-Agent never drifts from the published version.
  */
 declare const __SDK_VERSION__: string | undefined;
-const VERSION = typeof __SDK_VERSION__ !== "undefined" ? __SDK_VERSION__ : "2.6.1";
+const VERSION = typeof __SDK_VERSION__ !== "undefined" ? __SDK_VERSION__ : "2.7.0";
 const DEFAULT_USER_AGENT = `@assinafy/chat-sdk/${VERSION}`;
 const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 const RETRYABLE_METHOD = new Set(["GET", "HEAD", "OPTIONS"]);
@@ -519,10 +519,12 @@ function isLikelyTransient(err: unknown): boolean {
 }
 
 function redactPath(path: string): string {
-  return path.replace(
-    /([?&](?:access[-_]token|signer[-_]access[-_]code|access[-_]code|code|token)=)[^&]*/gi,
-    "$1[REDACTED]",
-  );
+  return path
+    .replace(/(\/(?:embed\/sessions|signers\/downloads)\/)[^/?#]+/g, "$1[REDACTED]")
+    .replace(
+      /([?&](?:access[-_]token|signer[-_]access[-_]code|access[-_]code|code|token)=)[^&]*/gi,
+      "$1[REDACTED]",
+    );
 }
 
 /** Internal: append a query object to a path, omitting undefined/null values. */

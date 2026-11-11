@@ -5,6 +5,40 @@ All notable changes to `@assinafy/chat-sdk` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.0] - 2026-11-11
+
+### Added
+
+- Envelope creation, cost estimates, document management, progress, downloads,
+  cancellation and reminders through `client.envelopes`.
+- Embedded signing origins and single-use iframe sessions through `client.embedded`.
+- Workspace usage and notification policies, personal push preferences, signer
+  branding, certified-copy delivery and manual webhook tests.
+- Embedded signer flags, creation credit ceilings, template idempotency keys,
+  envelope document filters and expansions, signed renders and activity pagination.
+- Webhook secret rotation with a 24-hour overlap and delivery duration metadata.
+
+### Changed
+
+- Signer context methods return `SigningDocument`, including compact closed-code
+  responses and signer-scoped assignments. Check optional document fields before use.
+- Signing URLs and unlimited cost-estimate balances accept null. Delivery history
+  includes delivered/opened stages; contract list discriminators are optional.
+- Development and CI use Node.js 24.22.3 and 26.13.1 LTS with compatible patched
+  tooling. CodeQL action updates are grouped at one version.
+
+### Fixed
+
+- Signer data confirmation forwards email, WhatsApp phone and terms acceptance.
+  Legacy name and government-ID properties remain deprecated inputs.
+- AI assignment and template tools preserve credit ceilings, including zero,
+  and accept at most one notification channel per signer.
+- Certificate cost estimates accept the API’s default virtual method when omitted.
+- Explicitly blank OAuth userinfo tokens reject before any request.
+- All chat adapters start before incoming messages can be lost during setup;
+  teardown waits for pending initialization after a failure.
+- Error paths redact embed-session and certified-copy download tokens.
+
 ## [2.6.1] - 2026-11-02
 
 ### Changed

@@ -490,9 +490,12 @@ describeLive("Assinafy API — live sandbox", () => {
     });
     expect(token === null || token === undefined || typeof token === "object").toBe(true);
 
-    const accessCode = extractAccessCode(assignment.signing_urls?.[0]?.url);
+    const signingLink = assignment.signing_urls?.[0]?.url;
+    expect(typeof signingLink).toBe("string");
+    const accessCode = extractAccessCode(signingLink);
     if (!accessCode) {
-      const signingUrl = new URL(assignment.signing_urls![0]!.url);
+      if (!signingLink) throw new Error("Email signing invitation did not return a signing URL");
+      const signingUrl = new URL(signingLink);
       expect(signingUrl.searchParams.get("email")).toBe(env!.primaryEmail);
       await client.documents.remove(doc.id);
       await expect(client.documents.get(doc.id)).rejects.toMatchObject({ status: 404 });
@@ -613,7 +616,7 @@ describeLive("Assinafy API — live sandbox", () => {
     return last;
   }
 
-  function extractAccessCode(url: string | undefined): string | undefined {
+  function extractAccessCode(url: string | null | undefined): string | undefined {
     if (!url) return undefined;
     try {
       const parsed = new URL(url);

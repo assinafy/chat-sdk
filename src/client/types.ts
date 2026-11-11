@@ -56,6 +56,13 @@ export interface Account {
   is_delete_allowed?: boolean;
   /** Plan limits, returned by `accounts.get` only. */
   limits?: { webhook_endpoints?: number; [key: string]: unknown };
+  signing_features?: {
+    DigitalCertificate: boolean;
+    VerificationIdDocumentFaceMatchBasic: boolean;
+    WhatsappNotification: boolean;
+    VerificationBypass: boolean;
+    Embed: boolean;
+  };
   created_at: string;
 }
 
@@ -326,7 +333,7 @@ export interface Signer {
 /** One e-mail or WhatsApp delivery attempt embedded in an assignment signer. */
 export interface NotificationHistoryEntry {
   event?: string;
-  status?: "sent" | "failed";
+  status?: "sent" | "delivered" | "opened" | "failed";
   error_code?: string | null;
   error_message?: string | null;
   sent_at?: string | null;
@@ -419,20 +426,17 @@ export interface ListSignersQuery {
 }
 
 /**
- * Signer data-confirmation request. The operation's body is
- * `{ full_name?, email?, government_id? }`.
+ * Signer contact confirmation and optional terms acceptance.
  */
 export interface SignerSelfConfirmDataInput {
+  /** @deprecated Not accepted by this operation; ignored. Update the workspace signer instead. */
   full_name?: string;
   email?: string;
-  /** Government identification number (e.g. CPF). */
+  /** @deprecated Not accepted by this operation; ignored. Update the workspace signer instead. */
   government_id?: string;
-  /** @deprecated Not accepted by the confirm-data operation; ignored. */
+  /** Required when verification or notification uses WhatsApp. */
   whatsapp_phone_number?: string;
-  /**
-   * `true` accepts the terms of use through the separate accept-terms
-   * operation right after the confirmation. Not part of the confirm-data body.
-   */
+  /** `true` records terms acceptance in the confirmation request. */
   has_accepted_terms?: boolean;
 }
 
@@ -542,7 +546,7 @@ export interface Assignment {
   copy_receivers?: Signer[];
   items: AssignmentItem[];
   summary: AssignmentSummary;
-  signing_urls?: Array<{ signer_id: string; url: string }>;
+  signing_urls?: SigningUrl[];
   completed_at?: string | number | null;
   created_at?: string | number;
   updated_at?: string | number;
@@ -561,6 +565,10 @@ export interface Document {
   is_closed: boolean;
   /** Whether contract terms are tracked on this document. */
   has_contract?: boolean;
+  /** Present only when requested with `expand: "envelope_id"`. */
+  envelope_id?: string | null;
+  /** Present only when requested with `expand: "envelope"`. */
+  envelope?: { id: string; name: string } | null;
   signing_url?: string | null;
   /** Public certificate verification code; null before certification and on older documents. */
   verification_code?: string | null;
@@ -601,6 +609,8 @@ export interface DocumentVerificationResult {
   signer_count: string | number | null;
   completed_count: number | null;
   completed_at: string | null;
+  /** First certification event timestamp; null when no event is available. */
+  certificated_at?: string | null;
   verified_at: string;
   is_valid: boolean;
   message: string;
@@ -608,6 +618,7 @@ export interface DocumentVerificationResult {
 
 /** Query accepted by account document lists. */
 export interface ListDocumentsQuery {
+  envelope_id?: string;
   status?: DocumentStatusCode | DocumentStatusCode[];
   method?: AssignmentMethod;
   search?: string;
@@ -622,7 +633,7 @@ export interface ListDocumentsQuery {
  * `page` and `perPage` are sent; `status`, `method` and `tags` are not part of
  * that operation and are ignored.
  */
-export type ListSignerDocumentsQuery = ListDocumentsQuery;
+export type ListSignerDocumentsQuery = ListDocumentsQuery & { envelope_id?: string };
 
 /**
  * Query accepted by the lightweight document-search endpoint. The search
@@ -630,6 +641,7 @@ export type ListSignerDocumentsQuery = ListDocumentsQuery;
  * assignment/pages).
  */
 export interface SearchDocumentsQuery {
+  envelope_id?: string;
   search?: string;
   status?: DocumentStatusCode | DocumentStatusCode[];
   sort?: string;
@@ -771,6 +783,8 @@ export interface TemplateRole {
 }
 
 interface TemplateSignerOptions {
+  /** Use a short-lived iframe session; no signing URL is returned for this signer. */
+  embedded?: boolean;
   step?: number;
   verification_method?: VerificationMethod;
   notification_methods?: NotificationMethod[];
@@ -814,6 +828,8 @@ export interface TemplateEditorFieldInput {
 
 /** Create-document-from-template request. */
 export interface CreateDocumentFromTemplateInput {
+  /** Maximum credits to charge; a higher cost refuses creation without charging. */
+  max_total_credits?: number;
   signers: TemplateSignerInput[];
   /** Editor fields; keyed object maps are deprecated in favor of the published array form. */
   editor_fields?: TemplateEditorFieldInput[] | Record<string, unknown>;
@@ -838,8 +854,8 @@ export interface CostEstimate {
     quantity?: number;
     unit_cost?: number;
   }>;
-  document_balance?: number;
-  credit_balance?: number;
+  document_balance?: number | null;
+  credit_balance?: number | null;
   has_sufficient_resources?: boolean;
   blocking_reason?: "PendingPayment" | "InsufficientDocuments" | "InsufficientCredits" | string | null;
   message?: string | null;
@@ -854,6 +870,8 @@ export interface CostEstimate {
 /** Per-signer assignment configuration. */
 export interface AssignmentSignerInput {
   id: string;
+  /** Use a short-lived iframe session; requires Email or WhatsApp verification. */
+  embedded?: boolean;
   step?: number;
   verification_method?: VerificationMethod;
   notification_methods?: NotificationMethod[];
@@ -873,6 +891,8 @@ export interface AssignmentEntryInput {
 }
 
 interface CreateAssignmentOptions {
+  /** Maximum credits to charge; 409 CreditCeilingExceeded refuses the whole request. */
+  max_total_credits?: number;
   message?: string;
   /** @deprecated Use `expires_at`; normalized before sending. */
   expiration?: string;
@@ -1123,6 +1143,8 @@ export interface WebhookEndpoint {
 /** An endpoint's Standard Webhooks signing secret: `whsec_` + base64 key. */
 export interface WebhookEndpointSecret {
   secret: string;
+  /** Present when rotation keeps the previous secret signing for 24 hours. */
+  previous_secret_expires_at?: string;
 }
 
 /** Webhook subscription upsert request. */
@@ -1190,6 +1212,7 @@ export interface WebhookDispatch {
   attempt?: number | null;
   kind?: "scheduled" | "probe" | "manual" | (string & {});
   will_retry?: boolean;
+  duration_ms?: number | null;
   http_status: number | null;
   response_body: string | null;
   error: string | null;
@@ -1356,7 +1379,8 @@ export interface ContractExternalReference {
 
 /** Terms tracked on one workspace document; API dates remain strings. */
 export interface DocumentContract {
-  resource: "document_contract";
+  /** Present only on single-resource responses, not list items. */
+  resource?: "document_contract";
   document_id: string;
   status: ContractStatus;
   counterparty_name: string | null;
@@ -1384,7 +1408,8 @@ export interface DocumentContract {
 
 /** A linked instrument; its terms apply only after document certification. */
 export interface DocumentContractAmendment {
-  resource: "document_contract_amendment";
+  /** Present only on single-resource responses, not nested amendments. */
+  resource?: "document_contract_amendment";
   document_id: string;
   document_name: string;
   parent_document_id: string;
@@ -1474,4 +1499,91 @@ export interface TerminateContractInput {
   /** Up to 500 characters; HTML is stripped and the reason stays in the event. */
   reason?: string | null;
   updated_at?: string;
+}
+
+/** A remaining resource balance; null indicates an unlimited balance or limit. */
+export interface Balance {
+  balance: number | null;
+  limit: number | null;
+  spent: number;
+}
+
+/** Workspace usage, unavailable to third-party OAuth applications. */
+export interface AccountUsage {
+  plan: string | null;
+  documents_renewal_date: string | null;
+  balances: { documents: Balance; credits: Balance };
+}
+
+/** Per-user phone push preferences, independent of e-mail preferences. */
+export interface PushPreferences {
+  SignerViewed: boolean;
+  SignerSigned: boolean;
+  DocumentCompleted: boolean;
+  SignerDeclined: boolean;
+  DocumentAboutToExpire: boolean;
+  DocumentExpired: boolean;
+  SignerIdentityReviewRequired: boolean;
+  SignerWhatsappFailed: boolean;
+}
+
+/** Workspace event switches across e-mail and push. Identity-review e-mail is always sent. */
+export type NotificationPolicyEvents = NotificationPreferences & PushPreferences;
+
+/** Workspace notification rules. Only owners may change them. */
+export interface NotificationPolicy {
+  editable: boolean;
+  owners_receive_all: boolean;
+  events: NotificationPolicyEvents;
+}
+
+/** Partial policy update; omitted keys retain their values. */
+export interface UpdateNotificationPolicyInput {
+  owners_receive_all?: boolean;
+  events?: Partial<NotificationPolicyEvents>;
+}
+
+/** Invitation links are null for WhatsApp-only and embedded signers. */
+export interface SigningUrl {
+  signer_id: string;
+  url: string | null;
+  embedded?: boolean;
+}
+
+/** Whether a signer can request another certified copy. */
+export interface CertifiedCopyAvailability {
+  available: boolean;
+  notification_method: "Email" | "Whatsapp" | null;
+  resends_left: number | null;
+}
+
+/** Delivery result; sent_to is a masked contact, never a new recipient. */
+export interface CertifiedCopyResult extends CertifiedCopyAvailability {
+  sent_to: string;
+}
+
+/** Closed signer codes return a compact document without workspace fields or artifacts. */
+export interface SigningDocument extends Partial<Pick<Document,
+  "resource" | "account_id" | "template_id" | "artifacts" | "is_closed" |
+  "has_contract" | "envelope_id" | "envelope" | "signing_url" |
+  "verification_code" | "verification_url" | "decline_reason" | "declined_by" |
+  "tags" | "created_at" | "updated_at" | "pages"
+>> {
+  id: string;
+  name: string;
+  status: DocumentStatusCode;
+  /** Only this signer's items; workspace signer lists and summary are omitted. */
+  assignment?: Pick<Assignment,
+    "resource" | "id" | "document_id" | "sender_email" | "method" | "status" |
+    "expiration" | "expires_at" | "message" | "items" | "completed_at" |
+    "created_at" | "updated_at"
+  > | null;
+  current_signer: Partial<Signer> & {
+    id: string;
+    verification_method: VerificationMethod;
+    notification_methods: NotificationMethod[] | null;
+    completed: boolean;
+  };
+  is_signer_access_closed: boolean;
+  certified_copy: CertifiedCopyAvailability;
 }

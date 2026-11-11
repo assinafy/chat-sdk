@@ -303,6 +303,30 @@ describe("HttpClient", () => {
     await expect(result).rejects.not.toHaveProperty("message", expect.stringContaining("also-secret"));
   });
 
+  it.each([
+    ["/embed/sessions/secret%2Fembed/exchange", "/embed/sessions/[REDACTED]/exchange"],
+    ["/signers/downloads/secret-download", "/signers/downloads/[REDACTED]"],
+    ["/signers/downloads/secret-download/resend", "/signers/downloads/[REDACTED]/resend"],
+    ["/signers/downloads/secret-download/pades", "/signers/downloads/[REDACTED]/pades"],
+    [
+      "https://api.example/v1/signers/downloads/secret-download/pades?token=secret-query&download=true",
+      "https://api.example/v1/signers/downloads/[REDACTED]/pades?token=[REDACTED]&download=true",
+    ],
+  ])("redacts bearer path credentials from errors for %s", async (path, redacted) => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response("denied", { status: 403 }));
+    const http = new HttpClient({
+      baseUrl: "https://api.example/v1", auth: { kind: "none" }, fetch: fetchImpl, maxRetries: 0,
+    });
+
+    const error = await http.rawRequest(path).catch((caught: unknown) => caught as ApiError);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ path: redacted });
+    expect((error as ApiError).message).toContain(redacted);
+    expect(JSON.stringify(error)).not.toContain("secret-");
+    expect((error as ApiError).message).not.toContain("secret");
+    expect(fetchImpl.mock.calls[0]![0]).toBe(path.startsWith("https:") ? path : `${http.baseUrl}${path}`);
+  });
+
   it("applies retries and rate-limit hooks to raw downloads", async () => {
     const onRateLimit = vi.fn();
     const fetchImpl = vi

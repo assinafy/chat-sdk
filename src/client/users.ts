@@ -6,6 +6,7 @@ import type {
   DocumentStatsQuery,
   DocumentStatsRow,
   NotificationPreferences,
+  PushPreferences,
   UpdateNotificationPreferences,
 } from "./types.js";
 
@@ -26,6 +27,21 @@ export class UsersResource {
   async getStats(query: DocumentStatsQuery = {}): Promise<DocumentStatsRow[]> {
     const { granularity, month } = query;
     return this.http.get<DocumentStatsRow[]>(withQuery("/users/self/stats", { granularity, month }));
+  }
+
+  /** Phone push settings, independent of e-mail; unavailable to third-party OAuth apps. */
+  getPushPreferences(): Promise<PushPreferences> {
+    return this.http.get<PushPreferences>("/users/self/push-preferences");
+  }
+
+  /** Merge push settings and return the full map. Unknown codes and empty maps receive 400. */
+  async updatePushPreferences(preferences: Partial<PushPreferences>): Promise<PushPreferences> {
+    const { SignerViewed, SignerSigned, DocumentCompleted, SignerDeclined, DocumentAboutToExpire,
+      DocumentExpired, SignerIdentityReviewRequired, SignerWhatsappFailed } = preferences;
+    return this.http.put<PushPreferences>("/users/self/push-preferences", {
+      SignerViewed, SignerSigned, DocumentCompleted, SignerDeclined, DocumentAboutToExpire,
+      DocumentExpired, SignerIdentityReviewRequired, SignerWhatsappFailed,
+    });
   }
 
   /** `GET /users/self/notification-preferences` — return all thirteen boolean settings. */

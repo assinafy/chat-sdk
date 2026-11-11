@@ -7,7 +7,7 @@
 
 import { withQuery, type HttpClient } from "./http.js";
 import { ConfigurationError } from "./errors.js";
-import { pageQuery } from "./internal.js";
+import { collectEntries, pageQuery } from "./internal.js";
 import { SignatureResource } from "./signature.js";
 import type {
   Assignment,
@@ -76,8 +76,8 @@ export class AssignmentsResource {
    *
    * Request: `{ method: "virtual" | "collect", signers: [{ id,
    * verification_method?: "Email" | "Whatsapp" | "DigitalCertificate" | "IdDocumentFaceMatchBasic",
-   * notification_methods?: ("Email" | "Whatsapp")[], step? }], entries?,
-   * message?, expires_at?, copy_receivers? }`. `entries` (page placements) is
+   * notification_methods?: ("Email" | "Whatsapp")[], embedded?, step? }], entries?,
+   * message?, expires_at?, copy_receivers?, max_total_credits? }`. `entries` (page placements) is
    * required for `collect`. The `signerIds`/`signer_ids` aliases are
    * normalized into `signers`. `DigitalCertificate` signers require
    * `method: "virtual"`. Response: the created {@link Assignment}, including
@@ -107,7 +107,7 @@ export class AssignmentsResource {
    * are not sent; each `signer_ids`/`signerIds` alias entry counts as one
    * Email signer (`{}`). `signers` is required for `virtual` (and when
    * `method` is omitted) and `entries` for `collect`; both are checked before
-   * the request. `DigitalCertificate` signers require `method: "virtual"`.
+   * the request. An omitted method defaults to `virtual`, including certificate estimates.
    * Response: {@link CostEstimate} — `documents`, `credits`,
    * `needs_extra_document`, `extra_document_cost`, `total_credits`,
    * `breakdown[]`, `document_balance`, `credit_balance`,
@@ -124,7 +124,7 @@ export class AssignmentsResource {
     } else if (signers.length === 0) {
       throw new ConfigurationError("AssignmentsResource.estimateCost requires at least one signer");
     }
-    assertDigitalCertificateMethod(input.method, signers);
+    assertDigitalCertificateMethod(input.method ?? "virtual", signers);
     return this.http.post<CostEstimate>(paths.estimate(documentId), {
       method: input.method,
       ...(signers.length > 0 ? { signers } : {}),
@@ -273,7 +273,7 @@ function normalizeAssignmentInput(
   input: CreateAssignmentInput | EstimateAssignmentCostInput,
 ): Record<string, unknown> & { signers?: EstimateAssignmentSignerInput[] } {
   const { signerIds, signer_ids, signers, method } = input;
-  const { expiration, expires_at, message, copy_receivers } = input as CreateAssignmentInput;
+  const { expiration, expires_at, message, copy_receivers, max_total_credits } = input as CreateAssignmentInput;
   const ids = [...(signer_ids ?? []), ...(signerIds ?? [])];
   const explicit = signers ?? [];
   const seen = new Set(explicit.map((s) => s.id).filter(Boolean));
@@ -283,27 +283,15 @@ function normalizeAssignmentInput(
     return [{ id }];
   });
   const merged = [...explicit, ...fromIds].map((signer) => {
-    const { id, step, verification_method, notification_methods } = signer as AssignmentSignerInput;
-    return { id, step, verification_method, notification_methods };
+    const { id, step, verification_method, notification_methods, embedded } = signer as AssignmentSignerInput;
+    return { id, step, verification_method, notification_methods, embedded };
   });
   return {
     method,
     message,
     copy_receivers,
+    max_total_credits,
     expires_at: expires_at === undefined ? expiration : expires_at,
     ...(merged.length > 0 ? { signers: merged } : {}),
   };
-}
-
-function collectEntries(entries: CreateAssignmentInput["entries"]): CreateAssignmentInput["entries"] {
-  return entries == null ? entries : entries.map(({ page_id, fields }) => ({
-    page_id,
-    fields: fields == null ? fields : fields.map(({ signer_id, field_id, display_settings }) => {
-      if (display_settings != null) {
-        const { left, top, width, height, fontSize, fontFamily, backgroundColor } = display_settings;
-        display_settings = { left, top, width, height, fontSize, fontFamily, backgroundColor };
-      }
-      return { signer_id, field_id, display_settings };
-    }),
-  }));
 }

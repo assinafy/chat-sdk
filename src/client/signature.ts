@@ -16,6 +16,9 @@ import { ConfigurationError } from "./errors.js";
 import { pageQuery, signerTransport, toBlobPart, withAccessCode } from "./internal.js";
 import type {
   Document,
+  AccountTheme,
+  CertifiedCopyResult,
+  SigningDocument,
   DocumentArtifactName,
   IdentityVerification,
   IdentityVerificationSession,
@@ -31,6 +34,10 @@ export type SignatureType = "signature" | "initial" | (string & {});
 
 const paths = {
   self: () => `/signers/self`,
+  theme: () => "/sign/theme",
+  logo: () => "/sign/logo",
+  certifiedCopy: () => "/sign/certified-copy",
+  copyDownload: (token: string) => `/signers/downloads/${encodeURIComponent(token)}`,
   identityVerification: () => `/signers/identity-verification`,
   acceptTerms: () => `/signers/accept-terms`,
   verify: () => `/verify`,
@@ -69,6 +76,41 @@ export class SignatureResource {
    */
   async self(accessCode: string): Promise<SignerSelf> {
     return this.signer.get<SignerSelf>(withAccessCode(paths.self(), accessCode));
+  }
+
+  /** Workspace branding for the signer, available before verification and after deletion. */
+  async getTheme(accessCode: string): Promise<AccountTheme> {
+    return this.signer.get<AccountTheme>(withAccessCode(paths.theme(), accessCode));
+  }
+
+  /** Download workspace branding with signer credentials only. No logo answers 404. */
+  async downloadLogo(accessCode: string): Promise<Response> {
+    return this.signer.rawRequest(withAccessCode(paths.logo(), accessCode));
+  }
+
+  /**
+   * Send the certified copy to the original signing contact, also for closed codes.
+   * Optional document_id selects another signed document of the same envelope.
+   * Email is limited to once per two minutes and ten per day; WhatsApp to one resend.
+   */
+  async sendCertifiedCopy(accessCode: string, input: { document_id?: string } = {}): Promise<CertifiedCopyResult> {
+    return this.signer.post<CertifiedCopyResult>(withAccessCode(paths.certifiedCopy(), accessCode),
+      input.document_id === undefined ? undefined : { document_id: input.document_id });
+  }
+
+  /**
+   * Public certified PDF download by bearer link token; optional pades selects ICP-Brasil output.
+   * Expired links answer 302 as ApiError; the transport never follows redirects with credentials.
+   */
+  async downloadCertifiedCopy(token: string, artifact?: "pades"): Promise<Response> {
+    if (typeof token !== "string" || !token.trim()) throw new ConfigurationError("A download token is required");
+    return this.signer.rawRequest(`${paths.copyDownload(token)}${artifact ? `/${encodeURIComponent(artifact)}` : ""}`);
+  }
+
+  /** Request a fresh copy using an expired download token. Uses the original contact and resend limits. */
+  async resendCertifiedCopy(token: string): Promise<CertifiedCopyResult> {
+    if (typeof token !== "string" || !token.trim()) throw new ConfigurationError("A download token is required");
+    return this.signer.post<CertifiedCopyResult>(`${paths.copyDownload(token)}/resend`);
   }
 
   /**
@@ -160,7 +202,7 @@ export class SignatureResource {
   }
 
   /**
-   * `GET /sign` — the signer-facing {@link Document} context; marks the
+   * `GET /sign` — the signer-facing {@link SigningDocument} context; marks the
    * document as viewed. A `409` means the document is still being prepared;
    * retry with backoff.
    *
@@ -169,15 +211,15 @@ export class SignatureResource {
    * `has_accepted_terms: true`, or {@link acceptTerms}); the query option here
    * is too late to satisfy that gate.
    */
-  async signContext(accessCode: string, options: { hasAcceptedTerms?: boolean } = {}): Promise<Document> {
-    return this.signer.get<Document>(
-      withAccessCode(paths.sign(), accessCode, { has_accepted_terms: options.hasAcceptedTerms }),
+  async signContext(accessCode: string, options: { hasAcceptedTerms?: boolean; expand?: "envelope"; document_id?: string } = {}): Promise<SigningDocument> {
+    return this.signer.get<SigningDocument>(
+      withAccessCode(paths.sign(), accessCode, { has_accepted_terms: options.hasAcceptedTerms, expand: options.expand, document_id: options.document_id }),
     );
   }
 
-  /** `GET /signers/{signerId}/document` — the {@link Document} the access code belongs to. */
-  async currentDocument(signerId: string, accessCode: string): Promise<Document> {
-    return this.signer.get<Document>(withAccessCode(paths.signerDocument(signerId), accessCode));
+  /** `GET /signers/{signerId}/document` — the {@link SigningDocument}, compact once the code closes. */
+  async currentDocument(signerId: string, accessCode: string, options: { expand?: "envelope" } = {}): Promise<SigningDocument> {
+    return this.signer.get<SigningDocument>(withAccessCode(paths.signerDocument(signerId), accessCode, { expand: options.expand }));
   }
 
   /**
@@ -301,5 +343,5 @@ export class SignatureResource {
 
 /** Query members the signer-document list operation declares. */
 function signerDocumentsQuery(query: ListSignerDocumentsQuery): Record<string, unknown> {
-  return { search: query.search, sort: query.sort, ...pageQuery(query.page, query.perPage) };
+  return { search: query.search, sort: query.sort, envelope_id: query.envelope_id, ...pageQuery(query.page, query.perPage) };
 }

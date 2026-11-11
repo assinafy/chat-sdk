@@ -84,6 +84,8 @@ export {
   type OAuthClientAuth,
   SignersResource,
   DocumentsResource,
+  EnvelopesResource,
+  EmbeddedResource,
   FieldsResource,
   TagsResource,
   type DeleteTagResult,
@@ -98,3 +100,6 @@ export {
   type UploadAccountLogoInput,
 } from "./client/index.js";
 export type * from "./client/types.js";
+
+export type * from "./client/envelope-types.js";
+export type * from "./client/embedded-types.js";

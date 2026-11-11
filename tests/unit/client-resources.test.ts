@@ -42,6 +42,66 @@ function makeClient(responses: unknown[] = [], accessToken?: string): { client: 
   return { client, requests };
 }
 
+it("forwards embedded signers and credit ceilings, and supports template idempotency", async () => {
+  const { client, requests } = makeClient();
+  await client.assignments.create("doc", {
+    method: "virtual", max_total_credits: 0,
+    signers: [{ id: "signer", verification_method: "Email", embedded: false }],
+  });
+  await client.templates.instantiate("account", "template", {
+    signers: [{ role_id: "role", id: "signer", embedded: true }], max_total_credits: 1.5,
+  }, { idempotencyKey: "one-document" });
+  await client.templates.instantiate("account", "template", { signers: [{ role_id: "role", id: "signer" }] });
+  expect(requests[0]!.body).toEqual({
+    method: "virtual", max_total_credits: 0,
+    signers: [{ id: "signer", verification_method: "Email", embedded: false }],
+  });
+  expect(requests[1]!.body).toEqual({ signers: [{ role_id: "role", id: "signer", embedded: true }], max_total_credits: 1.5 });
+  expect(new Headers(requests[1]!.init.headers).get("Idempotency-Key")).toBe("one-document");
+  expect(new Headers(requests[2]!.init.headers).has("Idempotency-Key")).toBe(false);
+});
+
+it("supports envelope filtering, expansions and signed page renders", async () => {
+  const { client, requests } = makeClient([[], [], {}, {}, {}, {}]);
+  await client.documents.list("account", { envelope_id: "env/1" });
+  await client.documents.search("account", { envelope_id: "env/1" });
+  await client.documents.get("doc/1", { expand: ["envelope_id", "envelope"] });
+  await client.documents.thumbnail("doc/1", { artifact: "certificated" });
+  await client.documents.downloadPage("doc/1", "page/1", { artifact: "certificated" });
+  await client.contracts.related("account", "doc/1", { expand: "document" });
+  expect(requests.map(({ url }) => Object.fromEntries(new URL(url).searchParams))).toEqual([
+    { envelope_id: "env/1" }, { envelope_id: "env/1" }, { expand: "envelope_id,envelope" },
+    { artifact: "certificated" }, { artifact: "certificated" }, { expand: "document" },
+  ]);
+  expect(new URL(requests[4]!.url).pathname).toBe("/v1/documents/doc%2F1/pages/page%2F1/download");
+});
+
+it("paginates document activities while retaining the array-returning method", async () => {
+  const rows = [{ id: 1, event: "document_uploaded", created_at: "2026-11-11T00:00:00Z" }];
+  const { client, requests } = makeClient([rows, rows]);
+  expect(await client.documents.activities("doc", { page: 2, perPage: 10 })).toEqual(rows);
+  expect(await client.documents.activitiesPage("doc", { sort: "id", page: 3, perPage: 10 })).toMatchObject({
+    data: rows, pagination: { totalCount: 1 },
+  });
+  expect(Object.fromEntries(new URL(requests[0]!.url).searchParams)).toEqual({ page: "2", "per-page": "10" });
+  expect(Object.fromEntries(new URL(requests[1]!.url).searchParams)).toEqual({ sort: "id", page: "3", "per-page": "10" });
+  await expect(client.documents.activities("doc", { page: 0 })).rejects.toBeInstanceOf(ConfigurationError);
+  expect(requests).toHaveLength(2);
+});
+
+it.each(["apiKey", "bearer"])("confirms signer contacts and terms in one credential-free call with %s clients", async (kind) => {
+  const { client, requests } = makeClient([{}], kind === "bearer" ? "workspace-token" : undefined);
+  await client.signers.confirmDataForDocument("doc", "signer-code", {
+    full_name: "Ignored Name", government_id: "ignored", email: "signer@example.com",
+    whatsapp_phone_number: "+5511999999999", has_accepted_terms: false,
+  });
+  expect(requests).toHaveLength(1);
+  expect(requests[0]!.body).toEqual({ email: "signer@example.com", whatsapp_phone_number: "+5511999999999", has_accepted_terms: false });
+  const headers = new Headers(requests[0]!.init.headers);
+  expect(headers.has("X-Api-Key")).toBe(false);
+  expect(headers.has("Authorization")).toBe(false);
+});
+
 it("limits authentication and user settings to declared request fields", async () => {
   const { client, requests } = makeClient();
   const login = { email: "user@example.com", password: "password", ignored: true };
@@ -281,15 +341,20 @@ describe("AssinafyClient resource paths", () => {
         signers: [{ id: "s1", verification_method: "DigitalCertificate" }],
       }),
       () => client.assignments.estimateCost("doc", collect),
-      () => client.assignments.estimateCost("doc", {
-        signers: [{ verification_method: "DigitalCertificate" }],
-      }),
     ]) {
       await expect(call()).rejects.toMatchObject({
         code: "DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL",
       });
     }
     expect(requests).toHaveLength(0);
+  });
+
+  it("estimates digital certificates using the API's default virtual method", async () => {
+    const { client, requests } = makeClient([{ total_credits: 0.5 }]);
+    await expect(client.assignments.estimateCost("doc", {
+      signers: [{ verification_method: "DigitalCertificate" }],
+    })).resolves.toEqual({ total_credits: 0.5 });
+    expect(requests[0]!.body).toEqual({ signers: [{ verification_method: "DigitalCertificate" }] });
   });
 
   it.each(["Email", "Whatsapp", "DigitalCertificate", "IdDocumentFaceMatchBasic"])(
@@ -730,12 +795,11 @@ describe("AssinafyClient resource paths", () => {
       "PUT /v1/accounts/acct/signers/s%201",
       "DELETE /v1/accounts/acct/signers/s%201",
       "PUT /v1/documents/doc%201/signers/confirm-data",
-      "PUT /v1/signers/accept-terms",
     ]);
     expect(new URL(requests[0]!.url).searchParams.get("per-page")).toBe("5");
     expect(new URL(requests[5]!.url).searchParams.get("signer-access-code")).toBe("code");
-    expect(requests[5]!.body).toEqual({ government_id: "123" });
-    expect(new URL(requests[6]!.url).searchParams.get("signer-access-code")).toBe("code");
+    expect(requests[5]!.body).toEqual({ whatsapp_phone_number: "+5511999999999", has_accepted_terms: true });
+    expect(new Headers(requests[5]!.init.headers).has("X-Api-Key")).toBe(false);
   });
 
   it.each(["apiKey", "bearer"])("uses only the signer code for biometric sessions with %s clients", async (kind) => {

@@ -499,6 +499,14 @@ describe("revokeToken", () => {
 describe("getUserInfo", () => {
   const claims = { sub: "d6zqpbyog2v3", name: "Test Signer", email_verified: true };
 
+  it.each(["", " \t\n"])("rejects an explicit blank token without using the configured credential", async (accessToken) => {
+    const { fetchImpl, calls } = routed({ "/v1/oauth/userinfo": () => json(claims) });
+    const connected = new AssinafyClient({ accessToken: "configured-token", baseUrl: API, fetch: fetchImpl });
+
+    await expect(connected.oauth.getUserInfo(accessToken)).rejects.toBeInstanceOf(ConfigurationError);
+    expect(calls).toHaveLength(0);
+  });
+
   it("uses the client's own credential by default", async () => {
     const { fetchImpl, calls } = routed({ "/v1/oauth/userinfo": () => json(claims) });
     const connected = new AssinafyClient({ accessToken: "at_live_9f2b", baseUrl: API, fetch: fetchImpl });
