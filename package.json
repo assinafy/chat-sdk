@@ -126,7 +126,7 @@
     "@types/node": "^24.19.2",
     "@typescript-eslint/eslint-plugin": "^8.72.2",
     "@typescript-eslint/parser": "^8.72.2",
-    "@vitest/coverage-v8": "^4.1.12",
+    "@vitest/coverage-v8": "^5.1.0",
     "dotenv": "^17.4.2",
     "eslint": "^10.14.0",
     "tsup": "^8.5.1",
