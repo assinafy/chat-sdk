@@ -123,7 +123,7 @@
   ],
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@types/node": "^24.19.2",
+    "@types/node": "^26.6.6",
     "@typescript-eslint/eslint-plugin": "^8.72.2",
     "@typescript-eslint/parser": "^8.72.2",
     "@vitest/coverage-v8": "^4.1.12",
