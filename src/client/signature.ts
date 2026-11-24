@@ -13,7 +13,7 @@
 
 import { withQuery, type HttpClient } from "./http.js";
 import { ConfigurationError } from "./errors.js";
-import { pageQuery, signerTransport, toBlobPart, withAccessCode } from "./internal.js";
+import { pageQuery, signerTransport, toUploadBlob, withAccessCode } from "./internal.js";
 import type {
   Document,
   AccountTheme,
@@ -160,7 +160,7 @@ export class SignatureResource {
 
   /**
    * `POST /signature` — upload a signature or initials image as the raw
-   * request body (published media type `image/png`). `type` selects the image
+   * request body (`image/png`, or `image/jpeg` on staging). `type` selects the image
    * kind; `reuse`, when supplied, updates the signer's reusable-signature
    * preference. Resolves on success.
    */
@@ -186,13 +186,13 @@ export class SignatureResource {
     const hasType = typeof args[0] === "string" || args[0] === undefined;
     const type = hasType ? args[0] : undefined;
     const image = (hasType ? args[1] : args[0]) as Blob | ArrayBuffer | Uint8Array;
-    const contentType = ((hasType ? args[2] : args[1]) as string | undefined) ?? "image/png";
+    const contentType = (hasType ? args[2] : args[1]) as string | undefined;
     const reuse = (hasType ? args[3] : args[2]) as boolean | undefined;
-    const body = image instanceof Blob ? image : new Blob([toBlobPart(image)], { type: contentType });
+    const body = toUploadBlob(image, contentType, "image/png");
     await this.signer.request<unknown>(withAccessCode(paths.upload(), accessCode, { type, reuse }), {
       method: "POST",
       body,
-      headers: { "content-type": contentType },
+      headers: { "content-type": body.type },
     });
   }
 
@@ -226,7 +226,7 @@ export class SignatureResource {
    * `GET /signers/{signerId}/documents` as the signer — the documents the
    * signer is party to, paginated via `X-Pagination-*`.
    *
-   * Query sent: `search`, `sort`, `page`, `per-page`. The `status`, `method`
+   * Query sent: `search`, `sort`, `envelope_id`, `page`, `per-page`. The `status`, `method`
    * and `tags` members of {@link ListSignerDocumentsQuery} are not part of this
    * operation and are ignored.
    */

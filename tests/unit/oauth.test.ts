@@ -102,6 +102,14 @@ describe("OAuthResource discovery", () => {
     );
   });
 
+  it("requires exact issuer identity in discovery, including trailing slashes", async () => {
+    const { client } = clientWith({
+      "/.well-known/oauth-authorization-server": () => json({ ...AUTH_SERVER, issuer: `${ISSUER}/` }),
+    });
+    await expect(client.oauth.getAuthorizationServerMetadata(ISSUER)).rejects.toBeInstanceOf(ConfigurationError);
+    await expect(client.oauth.getAuthorizationServerMetadata(`${ISSUER}/`)).resolves.toMatchObject({ issuer: `${ISSUER}/` });
+  });
+
   it("rejects a non-https issuer", async () => {
     const { client } = clientWith({});
     await expect(client.oauth.getAuthorizationServerMetadata("http://auth.example")).rejects.toThrow(
@@ -284,6 +292,7 @@ describe("readAuthorizationCallback", () => {
     ["a mismatched state", `code=abc&state=someone-elses&${iss}`],
     ["a state of a different length", `code=abc&state=s-1&${iss}`],
     ["a mismatched issuer", "code=abc&state=s-1234567890&iss=https%3A%2F%2Fevil.example"],
+    ["a trailing-slash issuer mismatch", `code=abc&state=s-1234567890&iss=${encodeURIComponent(ISSUER + "/")}`],
     ["a missing issuer", "code=abc&state=s-1234567890"],
     ["a missing code", `state=s-1234567890&${iss}`],
   ])("rejects %s", (_label, query) => {

@@ -5,6 +5,28 @@ All notable changes to `@assinafy/chat-sdk` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.0] - 2026-11-24
+
+### Added
+
+- Staging assignment and envelope scheduling, pending-send cancellation and
+  immediate dispatch, with shared workspace pagination.
+- Staging document watchers, signer capacities and notification delivery history.
+- Staging envelope reminder cost estimates and assignment `sign_as` inputs,
+  including the assignment AI tools.
+
+### Fixed
+
+- Signature uploads preserve a Blob's media type unless explicitly overridden.
+- OAuth discovery and callback issuer checks require exact matches, including
+  trailing slashes.
+
+### Changed
+
+- Development tooling uses paired Vitest 5.1.1 and coverage packages, tsup 9,
+  dotenv 18 and updated ESLint tooling. Node.js 24 and 26 LTS remain supported.
+- GitHub workflows use updated pinned CodeQL, Scorecard and artifact actions.
+
 ## [2.7.0] - 2026-11-11
 
 ### Added

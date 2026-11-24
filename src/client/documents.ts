@@ -13,6 +13,7 @@ import { ConfigurationError } from "./errors.js";
 import { anonymousTransport, csv, pageQuery, toUploadBlob } from "./internal.js";
 import type {
   Document,
+  Signer,
   DocumentActivity,
   DocumentArtifactName,
   DocumentStatus,
@@ -194,6 +195,21 @@ export class DocumentsResource {
     return this.http.getPage<DocumentActivity>(withQuery(paths.activities(documentId), {
       sort: query.sort, ...pageQuery(query.page, query.perPage),
     }));
+  }
+
+  /** `GET /documents/{documentId}/watchers` — staging; ordered contacts following the document; OAuth applications are refused. */
+  listWatchers(documentId: string): Promise<Signer[]> {
+    return this.http.get(`${paths.item(documentId)}/watchers`);
+  }
+
+  /**
+   * `PUT /documents/{documentId}/watchers` — staging; replace with up to ten
+   * workspace contact IDs, each with email. [] clears them. Returns Signer[].
+   * Watchers receive a terminal-status email without a link or file. Closed
+   * documents reject changes; OAuth applications cannot manage watchers.
+   */
+  setWatchers(documentId: string, watcherIds: string[]): Promise<Signer[]> {
+    return this.http.put(`${paths.item(documentId)}/watchers`, { watcher_ids: watcherIds });
   }
 
   /**

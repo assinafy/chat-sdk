@@ -1216,3 +1216,22 @@ From 2.7.0, `signContext` and `currentDocument` return `SigningDocument`: closed
 required signer/status/certified-copy fields, without artifacts or workspace data.
 Check `is_signer_access_closed` and optional fields before accessing document data.
 Signing URLs may be null for WhatsApp-only and embedded signers.
+
+
+### Staging scheduled sends and participants
+
+The staging contract publishes ten additional operations (157 total; production
+publishes 147). Configure the supplied staging base URL. Upload and estimate,
+then use `assignments.schedule` or `envelopes.schedule` with `send_at`.
+`assignments.listScheduledSends` follows either kind; `cancelScheduledSend`
+prevents a pending dispatch and `sendScheduledNow` dispatches immediately.
+Scheduling does not charge or send; dispatch checks current balances and access.
+Assignment `sign_as` records capacity; `getSignerCapacities` and
+`getNotificationHistory` return capacity and delivery timestamps.
+`documents.listWatchers`/`setWatchers` manage terminal-status contacts, and
+`envelopes.estimateResendCost` prices reminders without sending them.
+See [full requests, responses and lifecycle](docs/API_REFERENCE.md#scheduled-sends-and-participant-tracking).
+Signature uploads preserve Blob MIME types and honor explicit overrides;
+staging accepts JPEG as well as PNG.
+
+OAuth discovery and callback issuer checks use exact strings, including trailing slashes. Preserve the discovered issuer unchanged in the stored authorization attempt.

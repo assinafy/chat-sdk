@@ -3,7 +3,7 @@
 This is the reference for the public surface of `@assinafy/chat-sdk`.
 The REST contracts follow the official OpenAPI document at
 [`https://api.assinafy.com.br/v1/docs/openapi.json`](https://api.assinafy.com.br/v1/docs/openapi.json)
-and the complete 147-operation REST inventory is in the
+and the 147 production operations plus ten staging additions are indexed in the
 [API operation index](./API_COVERAGE.md).
 
 The client exposes the API operations plus pagination helpers, deprecated
@@ -4345,3 +4345,193 @@ ceiling; its result is the normal [document response](#document-response).
 
 Certificate assignment estimates default to `virtual` when `method` is omitted.
 Explicit `collect` certificate requests reject before fetch.
+
+
+## Scheduled sends and participant tracking
+
+These methods and `sign_as` are available on staging. Configure the supplied
+staging `baseUrl`; the SDK does not switch environments or fall back to production.
+All methods use workspace credentials. Watchers reject third-party OAuth;
+capacities and notification history need `documents:read`. Scheduling, listing
+scheduled sends, dispatching, cancelling and reminder estimates need `documents:write`.
+
+| Method | HTTP request | Request body/query | Unwrapped response |
+| --- | --- | --- | --- |
+| <a id="assignments-get-signer-capacities"></a>`assignments.getSignerCapacities(documentId)` | `GET /documents/{documentId}/signer-capacities` | none | [Capacity list](#signer-capacity-response) |
+| <a id="assignments-get-notification-history"></a>`assignments.getNotificationHistory(documentId)` | `GET /documents/{documentId}/notification-history` | none | [Delivery history](#notification-delivery-response) |
+| <a id="assignments-schedule"></a>`assignments.schedule(documentId, input)` | `POST /documents/{documentId}/scheduled-sends` | [Assignment schedule](#scheduled-assignment-request) | [ScheduledSend](#scheduled-send-response) |
+| <a id="assignments-list-scheduled-sends"></a>`assignments.listScheduledSends(accountId, query?)` | `GET /accounts/{accountId}/scheduled-sends` | optional `document_id`, `page`, `perPage` (wire: `per-page`) | [Page of ScheduledSend](#scheduled-send-list-response) |
+| <a id="assignments-cancel-scheduled-send"></a>`assignments.cancelScheduledSend(accountId, scheduledSendId)` | `PUT /accounts/{accountId}/scheduled-sends/{scheduledSendId}/cancel` | none | [ScheduledSend](#scheduled-send-response), status `cancelled` |
+| <a id="assignments-send-scheduled-now"></a>`assignments.sendScheduledNow(accountId, scheduledSendId)` | `PUT /accounts/{accountId}/scheduled-sends/{scheduledSendId}/send` | none | [ScheduledSend](#scheduled-send-response), status `sent` |
+| <a id="envelopes-schedule"></a>`envelopes.schedule(accountId, input)` | `POST /accounts/{accountId}/scheduled-sends` | [Envelope schedule](#scheduled-envelope-request) | [ScheduledSend](#scheduled-send-response) |
+| <a id="envelopes-estimate-resend-cost"></a>`envelopes.estimateResendCost(accountId, envelopeId, signerId)` | `POST /accounts/{accountId}/envelopes/{envelopeId}/signers/{signerId}/estimate-resend-cost` | none | [Reminder estimate](#envelope-reminder-estimate-response) |
+| <a id="documents-list-watchers"></a>`documents.listWatchers(documentId)` | `GET /documents/{documentId}/watchers` | none | [Watcher list](#document-watchers-response) |
+| <a id="documents-set-watchers"></a>`documents.setWatchers(documentId, watcherIds)` | `PUT /documents/{documentId}/watchers` | [Watcher IDs](#document-watchers-request) | [Watcher list](#document-watchers-response) |
+
+### Scheduled assignment request
+
+Upload the document, resolve its contacts, estimate the assignment cost, then
+schedule. `send_at` accepts an ISO date-time or Unix seconds. The other fields
+use the create-assignment shape, including collect `entries`, `message`,
+`copy_receivers` and `max_total_credits`. `method` defaults to `virtual`.
+Scheduled `expires_at` also accepts Unix seconds or null.
+
+```json
+{
+  "send_at": "2030-01-02T12:00:00Z",
+  "method": "virtual",
+  "signers": [{ "id": "signer1", "verification_method": "Email", "notification_methods": ["Email"], "embedded": false, "sign_as": "Witness" }],
+  "message": "Please sign the test agreement",
+  "expires_at": null,
+  "copy_receivers": [],
+  "max_total_credits": 0
+}
+```
+
+Scheduling sends and charges nothing. Each document allows one pending or
+processing send. The worker runs every five minutes and dispatches as the
+original scheduling member, with current permissions, features and balances.
+A failed scheduled dispatch records `failure_reason` and emails the scheduling
+member, or active workspace owners when that member has left. A document can
+still be sent immediately through its ordinary assignment route; the later
+scheduled attempt then fails.
+
+List to follow progress, cancel to prevent dispatch, or call `sendScheduledNow`
+to dispatch immediately. Both cancel and send-now require `pending`; other
+states return 409. A refused send-now stays pending and sends no failure email:
+cancel it if the later worker must not try. No mutation is automatically retried.
+
+### Scheduled envelope request
+
+Uses the full [envelope creation body](#envelope-create-request) plus `send_at`.
+The plan must support envelopes. Idempotency keys are not read by scheduling:
+each call creates a separate scheduled record.
+
+```json
+{
+  "send_at": "2030-01-02T12:00:00Z",
+  "name": "Scheduled agreement",
+  "message": null,
+  "max_total_credits": 0,
+  "signers": [{ "id": "signer1", "verification_method": "Email", "notification_methods": ["Email"], "embedded": false }],
+  "documents": [{ "id": "document1", "method": "virtual", "signer_ids": ["signer1"], "expires_at": null, "copy_receiver_ids": [] }]
+}
+```
+
+### Scheduled send response
+
+All lifecycle methods return the complete record. `assignment_id` or
+`envelope_id` is populated after dispatch; the other remains null. Status is
+`pending`, `processing`, `sent`, `cancelled` or `failed`. `processed_at` is null
+until processed. Cancellation creates neither assignment nor envelope.
+
+```json
+{
+  "resource": "scheduled_send",
+  "id": "scheduled1",
+  "type": "assignment",
+  "document_ids": ["document1"],
+  "status": "pending",
+  "send_at": "2030-01-02T12:00:00Z",
+  "assignment_id": null,
+  "envelope_id": null,
+  "failure_reason": null,
+  "created_at": "2030-01-01T12:00:00Z",
+  "processed_at": null
+}
+```
+
+### Scheduled send list response
+
+Newest first, 20 per page by default; `perPage` accepts 1–100. An SDK example:
+
+```json
+{
+  "data": [{ "resource": "scheduled_send", "id": "scheduled1", "type": "envelope", "document_ids": ["document1"], "status": "sent", "send_at": "2030-01-02T12:00:00Z", "assignment_id": null, "envelope_id": "envelope1", "failure_reason": null, "created_at": "2030-01-01T12:00:00Z", "processed_at": "2030-01-02T12:00:01Z" }],
+  "pagination": { "currentPage": 1, "pageCount": 1, "perPage": 20, "totalCount": 1 }
+}
+```
+
+### Signer capacity response
+
+`assignments.create`, `estimateCost` and `schedule` preserve per-signer `sign_as`.
+Omission or null means `Sign`. Allowed values: `Sign`, `Approve`, `Acknowledge`,
+`Party`, `Witness`, `Intervening`, `Receipt`, `IssuerEndorserGuarantor`,
+`IssuerEndorserGuarantorSurety`, `Surety`, `PartySurety`, `JointDebtor`,
+`PartyJointDebtor`, `ContractingParty`, `ContractedParty`, `Landlord`, `Tenant`,
+`Buyer`, `Seller`, `AttorneyInFact`, `LegalRepresentative`, `Employer`, `Employee`.
+The assignment creation and estimate AI tools accept the same values.
+Templates and envelope signer bodies do not declare this field.
+
+```json
+[{ "signer_id": "signer1", "sign_as": "Witness" }]
+```
+
+The order matches the document assignment. Before assignment, the result is `[]`.
+
+### Notification delivery response
+
+```json
+[{
+  "signer_id": "signer1",
+  "notification_history": [{
+    "event": "invitation", "status": "sent",
+    "error_code": null, "error_message": null,
+    "sent_at": "2030-01-01T12:00:00Z", "failed_at": null,
+    "delivered_at": "2030-01-01T12:00:03Z", "opened_at": null
+  }]
+}]
+```
+
+The added timestamps are null until recorded. Email opens/clicks and WhatsApp
+read receipts are hints, not proof that a person read the message. Scanners can
+open mail, and privacy settings can suppress tracking. Before assignment, `[]`.
+
+### Envelope reminder estimate response
+
+```json
+{
+  "total": 0,
+  "breakdown": [],
+  "credit_balance": null,
+  "has_sufficient_credits": true
+}
+```
+
+One reminder covers the whole envelope. The estimate sends nothing and does not
+check eligibility: resend still rejects closed envelopes (409), completed signers,
+recent reminders and exceeded reminder limits (400).
+
+### Document watchers request
+
+```json
+{ "watcher_ids": ["signer1"] }
+```
+
+Replaces the list in the supplied order. Use `[]` to clear it. Up to ten workspace
+contacts, each with an email; duplicate IDs count once. Set them before sending
+and update until the document ends. Watchers receive a queued terminal-status
+email on decline, expiration or completion, without a document link or file.
+Their notification is independent of workspace notification settings.
+
+### Document watchers response
+
+```json
+[{
+  "resource": "signer", "id": "signer1", "full_name": "Test Contact",
+  "email": "watcher@example.test", "whatsapp_phone_number": null,
+  "government_id": null, "has_accepted_terms": false
+}]
+```
+
+Deleted contacts are omitted. Closed documents, missing email, foreign contacts,
+invalid IDs or more than ten watchers return 400; unknown documents return 404.
+
+Signature image uploads preserve a Blob's MIME type; explicit `contentType`
+overrides it. PNG is supported in production; staging also publishes JPEG.
+
+
+OAuth issuer identifiers must match exactly in discovery and callbacks, including
+any trailing slash. Store the discovered issuer unchanged with each authorization
+attempt and pass it to `readAuthorizationCallback`; URL normalization is not an
+issuer identity check.

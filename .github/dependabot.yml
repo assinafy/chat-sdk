@@ -9,6 +9,10 @@ updates:
       timezone: America/Sao_Paulo
     open-pull-requests-limit: 5
     groups:
+      vitest:
+        patterns:
+          - "vitest"
+          - "@vitest/*"
       dev-dependencies:
         dependency-type: development
         update-types:

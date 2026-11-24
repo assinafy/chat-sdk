@@ -1,6 +1,6 @@
 # Assinafy v1 API operation index
 
-This index lists the 147 Assinafy v1 operations, their SDK methods, request and
+This index lists the 147 production Assinafy v1 operations and ten staging additions, their SDK methods, request and
 response documentation, and authentication mode. Paths include the `/v1`
 prefix; SDK resource methods use a `baseUrl` that already contains it.
 
@@ -346,3 +346,22 @@ for signing-method restrictions and the lifecycle through certification.
 | GET | `/v1/signers/downloads/{token}` | `client.signature.downloadCertifiedCopy` | [Request](API_REFERENCE.md#signature-download-certified-copy) | [Response](API_REFERENCE.md#signature-download-certified-copy) | Public |
 | POST | `/v1/signers/downloads/{token}/resend` | `client.signature.resendCertifiedCopy` | [Request](API_REFERENCE.md#signature-resend-certified-copy) | [Response](API_REFERENCE.md#signature-resend-certified-copy) | Public |
 | POST | `/v1/accounts/{accountId}/webhooks/endpoints/{endpointId}/test` | `client.webhooks.testEndpoint` | [Request](API_REFERENCE.md#webhooks-test-endpoint) | [Response](API_REFERENCE.md#webhooks-test-endpoint) | Bearer / API key |
+
+## Staging additions
+
+These ten operations are published by the staging API (157 operations total).
+Set `baseUrl` to the staging API's versioned base URL supplied for your workspace.
+Production retains the 147-operation contract above. No fallback changes hosts.
+
+| Method | Path | SDK method | Request | SDK response | Auth |
+| --- | --- | --- | --- | --- | --- |
+| GET | `/v1/documents/{documentId}/signer-capacities` | `client.assignments.getSignerCapacities` | [Request](API_REFERENCE.md#assignments-get-signer-capacities) | [Unwrapped response](API_REFERENCE.md#assignments-get-signer-capacities) | Bearer / API key |
+| GET | `/v1/documents/{documentId}/notification-history` | `client.assignments.getNotificationHistory` | [Request](API_REFERENCE.md#assignments-get-notification-history) | [Unwrapped response](API_REFERENCE.md#assignments-get-notification-history) | Bearer / API key |
+| POST | `/v1/documents/{documentId}/scheduled-sends` | `client.assignments.schedule` | [Request](API_REFERENCE.md#assignments-schedule) | [Unwrapped response](API_REFERENCE.md#assignments-schedule) | Bearer / API key |
+| GET | `/v1/accounts/{accountId}/scheduled-sends` | `client.assignments.listScheduledSends` | [Request](API_REFERENCE.md#assignments-list-scheduled-sends) | [Unwrapped response](API_REFERENCE.md#assignments-list-scheduled-sends) | Bearer / API key |
+| PUT | `/v1/accounts/{accountId}/scheduled-sends/{scheduledSendId}/cancel` | `client.assignments.cancelScheduledSend` | [Request](API_REFERENCE.md#assignments-cancel-scheduled-send) | [Unwrapped response](API_REFERENCE.md#assignments-cancel-scheduled-send) | Bearer / API key |
+| PUT | `/v1/accounts/{accountId}/scheduled-sends/{scheduledSendId}/send` | `client.assignments.sendScheduledNow` | [Request](API_REFERENCE.md#assignments-send-scheduled-now) | [Unwrapped response](API_REFERENCE.md#assignments-send-scheduled-now) | Bearer / API key |
+| POST | `/v1/accounts/{accountId}/scheduled-sends` | `client.envelopes.schedule` | [Request](API_REFERENCE.md#envelopes-schedule) | [Unwrapped response](API_REFERENCE.md#envelopes-schedule) | Bearer / API key |
+| POST | `/v1/accounts/{accountId}/envelopes/{envelopeId}/signers/{signerId}/estimate-resend-cost` | `client.envelopes.estimateResendCost` | [Request](API_REFERENCE.md#envelopes-estimate-resend-cost) | [Unwrapped response](API_REFERENCE.md#envelopes-estimate-resend-cost) | Bearer / API key |
+| GET | `/v1/documents/{documentId}/watchers` | `client.documents.listWatchers` | [Request](API_REFERENCE.md#documents-list-watchers) | [Unwrapped response](API_REFERENCE.md#documents-list-watchers) | Bearer / API key |
+| PUT | `/v1/documents/{documentId}/watchers` | `client.documents.setWatchers` | [Request](API_REFERENCE.md#documents-set-watchers) | [Unwrapped response](API_REFERENCE.md#documents-set-watchers) | Bearer / API key |

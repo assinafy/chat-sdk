@@ -630,7 +630,7 @@ export interface ListDocumentsQuery {
 
 /**
  * Query accepted by signer-facing document lists. Only `search`, `sort`,
- * `page` and `perPage` are sent; `status`, `method` and `tags` are not part of
+ * `envelope_id`, `page` and `perPage` are sent; `status`, `method` and `tags` are not part of
  * that operation and are ignored.
  */
 export type ListSignerDocumentsQuery = ListDocumentsQuery & { envelope_id?: string };
@@ -867,9 +867,57 @@ export interface CostEstimate {
 // Assignments
 // ---------------------------------------------------------------------------
 
+/** Capacity recorded on an assignment signer (staging). Null or omission uses Sign. */
+export type SignerCapacity =
+  | "Sign" | "Approve" | "Acknowledge" | "Party" | "Witness" | "Intervening"
+  | "Receipt" | "IssuerEndorserGuarantor" | "IssuerEndorserGuarantorSurety"
+  | "Surety" | "PartySurety" | "JointDebtor" | "PartyJointDebtor"
+  | "ContractingParty" | "ContractedParty" | "Landlord" | "Tenant" | "Buyer"
+  | "Seller" | "AttorneyInFact" | "LegalRepresentative" | "Employer" | "Employee";
+
+/** Workspace view of one signer's capacity. */
+export interface AssignmentSignerCapacity {
+  signer_id: string;
+  sign_as: SignerCapacity;
+}
+
+/** Delivery timestamps are hints; opening does not prove a person read the message. */
+export interface SignerNotificationHistory {
+  signer_id: string;
+  notification_history: Array<NotificationHistoryEntry & {
+    delivered_at: string | null;
+    opened_at: string | null;
+  }>;
+}
+
+/** A deferred assignment or envelope, returned by the staging scheduled-send routes. */
+export interface ScheduledSend {
+  resource?: string;
+  id: string;
+  type: "assignment" | "envelope";
+  document_ids: string[];
+  status: "pending" | "processing" | "sent" | "cancelled" | "failed";
+  send_at: string;
+  assignment_id: string | null;
+  envelope_id: string | null;
+  failure_reason: string | null;
+  created_at: string;
+  processed_at: string | null;
+}
+
+/** Schedule the same assignment body; omitted method defaults to virtual. */
+export type ScheduleAssignmentInput = Omit<CreateAssignmentOptions, "expires_at"> & AssignmentSignerSource & {
+  send_at: string | number;
+  method?: AssignmentMethod;
+  entries?: AssignmentEntryInput[];
+  expires_at?: string | number | null;
+};
+
 /** Per-signer assignment configuration. */
 export interface AssignmentSignerInput {
   id: string;
+  /** Staging: capacity shown in the signing record. */
+  sign_as?: SignerCapacity | null;
   /** Use a short-lived iframe session; requires Email or WhatsApp verification. */
   embedded?: boolean;
   step?: number;
@@ -936,6 +984,8 @@ export type CreateAssignmentInput = CreateAssignmentOptions &
 
 /** Per-signer input accepted by assignment cost estimation (no signer ID needed). */
 export interface EstimateAssignmentSignerInput {
+  /** Staging: validated with the assignment request. */
+  sign_as?: SignerCapacity | null;
   /** @deprecated Signer ids do not affect cost and are not sent. */
   id?: string;
   verification_method?: VerificationMethod;

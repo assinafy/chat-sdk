@@ -108,3 +108,8 @@ export interface EnvelopeResendResult {
   envelope_id: string;
   signer_id: string;
 }
+
+/** Staging: defer envelope creation; send_at is ISO 8601 or Unix seconds. */
+export interface ScheduleEnvelopeInput extends CreateEnvelopeInput {
+  send_at: string | number;
+}

@@ -93,6 +93,22 @@ function fakeClient(): AssinafyClient {
 }
 
 describe("createChatTools", () => {
+  it("validates and forwards assignment capacities for creation and estimates", async () => {
+    const client = fakeClient();
+    const tools = createChatTools(client);
+    for (const sign_as of ["Witness", null]) {
+      const signers = [{ id: "s1", sign_as }];
+      await runTool(tools, "create_assignment", { documentId: "d1", method: "virtual", signers });
+      await runTool(tools, "estimate_assignment_cost", { documentId: "d1", signers });
+      expect(client.assignments.create).toHaveBeenLastCalledWith("d1", expect.objectContaining({ signers }));
+      expect(client.assignments.estimateCost).toHaveBeenLastCalledWith("d1", expect.objectContaining({ signers }));
+    }
+    await expect(runTool(tools, "create_assignment", {
+      documentId: "d1", method: "virtual", signers: [{ id: "s1", sign_as: "invalid" }],
+    })).rejects.toBeInstanceOf(ConfigurationError);
+    expect(client.assignments.create).toHaveBeenCalledTimes(2);
+  });
+
   it("ships every documented tool", () => {
     const tools = createChatTools(fakeClient());
     const names = tools.map((t) => t.name).sort();

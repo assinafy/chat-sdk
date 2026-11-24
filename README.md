@@ -7,10 +7,10 @@
 [![npm version](https://img.shields.io/npm/v/@assinafy/chat-sdk.svg)](https://www.npmjs.com/package/@assinafy/chat-sdk)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-SDK TypeScript manual e sem dependências de runtime para as 147 operações da API Assinafy v1, OAuth 2.1, fluxos de assinatura, chat, cards e ferramentas de LLM.
+SDK TypeScript manual e sem dependências de runtime para 147 operações de produção e dez adicionais de staging da API Assinafy v1, OAuth 2.1, fluxos de assinatura, chat, cards e ferramentas de LLM.
 
 - [Referência completa: métodos e payloads](docs/API_REFERENCE.md)
-- [Mapa das 147 operações](docs/API_COVERAGE.md)
+- [Mapa das operações](docs/API_COVERAGE.md)
 - [Documentação oficial da Assinafy](https://api.assinafy.com.br/v1/docs)
 
 ## Instalação e runtime
@@ -134,7 +134,7 @@ const connected = new AssinafyClient({ accessToken: tokens.access_token });
 const [connectedAccount] = await connected.accounts.list();
 ```
 
-Cada conexão cobre uma conta. Valide `state` e `iss`; o SDK faz isso em `readAuthorizationCallback`. Códigos duram 60 segundos. Tokens de acesso duram uma hora. `offline_access` entrega refresh token, que dura 30 dias sem uso e rotaciona a cada refresh.
+Cada conexão cobre uma conta. Valide `state` e `iss` (issuer exato, inclusive barra final); o SDK faz isso em `readAuthorizationCallback`. Códigos duram 60 segundos. Tokens de acesso duram uma hora. `offline_access` entrega refresh token, que dura 30 dias sem uso e rotaciona a cada refresh.
 
 Envie cada refresh token uma única vez e use um lock por conexão. Persista o novo token antes de qualquer outro uso. Timeout, conexão caída, `5xx` ou resposta de erro podem ocorrer depois da rotação: se o armazenamento não contém token mais novo, marque a conexão como inutilizável e reconecte. Ao desconectar, bloqueie refreshes, revogue o token mais recente e apague o estado local.
 
@@ -157,6 +157,8 @@ Contratos usam `client.contracts`: envie o documento, defina os termos, vincule 
 Envelopes agrupam documentos com `client.envelopes`: estime, crie com `max_total_credits` e uma chave de idempotência, acompanhe cada documento e baixe o ZIP. Criar envia convites. Em assinatura incorporada, registre a origem com `client.embedded`, marque o signatário `embedded: true` e crie uma sessão de cinco minutos no servidor. Entregue a URL completa ao iframe; valide origem e janela de `postMessage`. Troque cada token uma única vez. [Payloads e fluxo](docs/API_REFERENCE.md#embedded-signing).
 
 `accounts.get(accountId, { expand: "signing_features" })` informa os recursos habilitados. `accounts.getUsage`, políticas de notificação e preferências push não aceitam OAuth de terceiros. `signature.getTheme`/`downloadLogo` usam somente o código do signatário; `sendCertifiedCopy` envia ao contato original. `rotateEndpointSecret(..., { keep_previous: true })` mantém ambas as assinaturas por 24 horas.
+
+Em staging, use `assignments.schedule` ou `envelopes.schedule` com `send_at`, acompanhe com `assignments.listScheduledSends` e cancele com `cancelScheduledSend` ou antecipe com `sendScheduledNow`. Agendar não envia nem cobra; despachar usa os recursos atuais. `sign_as` define a capacidade do signatário; `getSignerCapacities` e `getNotificationHistory` retornam capacidades e entrega. `documents.setWatchers` configura contatos que recebem o status final; `envelopes.estimateResendCost` estima lembretes. [Fluxos e payloads](docs/API_REFERENCE.md#scheduled-sends-and-participant-tracking).
 
 ## Chat, cards e LLM
 

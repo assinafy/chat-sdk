@@ -1,7 +1,7 @@
 /** Documents sent together to the same signers (`client.envelopes`). */
 import { withQuery, type HttpClient } from "./http.js";
 import { collectEntries, pageQuery } from "./internal.js";
-import type { CostEstimate, DocumentArtifactName, Page } from "./types.js";
+import type { CostEstimate, DocumentArtifactName, Page, ResendCostEstimate, ScheduledSend } from "./types.js";
 import type {
   AddEnvelopeDocumentInput,
   CreateEnvelopeInput,
@@ -12,6 +12,7 @@ import type {
   EnvelopeResendResult,
   ListEnvelopesQuery,
   UpdateEnvelopeInput,
+  ScheduleEnvelopeInput,
 } from "./envelope-types.js";
 
 const paths = {
@@ -53,6 +54,23 @@ export class EnvelopesResource {
   /** `POST .../envelopes/estimate-cost` — validate and price the creation body without charging or sending. */
   async estimateCost(accountId: string, input: CreateEnvelopeInput): Promise<CostEstimate> {
     return this.http.post(`${paths.collection(accountId)}/estimate-cost`, envelopeFields(input));
+  }
+
+  /**
+   * `POST /accounts/{accountId}/scheduled-sends` — staging; retain an envelope
+   * body plus send_at (ISO time or Unix seconds), without creating or charging.
+   * Returns ScheduledSend; manage it through assignments.listScheduledSends,
+   * cancelScheduledSend and sendScheduledNow. Idempotency keys are not supported.
+   */
+  async schedule(accountId: string, input: ScheduleEnvelopeInput): Promise<ScheduledSend> {
+    return this.http.post(`/accounts/${encodeURIComponent(accountId)}/scheduled-sends`, {
+      ...envelopeFields(input), send_at: input.send_at,
+    });
+  }
+
+  /** `POST .../envelopes/{envelopeId}/signers/{signerId}/estimate-resend-cost` — staging; no body, charge or delivery; does not check reminder eligibility. */
+  estimateResendCost(accountId: string, envelopeId: string, signerId: string): Promise<ResendCostEstimate> {
+    return this.http.post(`${paths.item(accountId, envelopeId)}/signers/${encodeURIComponent(signerId)}/estimate-resend-cost`);
   }
 
   /** `GET .../envelopes/{envelopeId}` — document order, signing progress, artifacts and links. */

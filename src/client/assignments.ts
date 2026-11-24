@@ -11,6 +11,10 @@ import { collectEntries, pageQuery } from "./internal.js";
 import { SignatureResource } from "./signature.js";
 import type {
   Assignment,
+  AssignmentSignerCapacity,
+  ScheduleAssignmentInput,
+  ScheduledSend,
+  SignerNotificationHistory,
   AssignmentSignerInput,
   CostEstimate,
   CreateAssignmentInput,
@@ -28,6 +32,8 @@ import type {
 } from "./types.js";
 
 const paths = {
+  document: (documentId: string) => `/documents/${encodeURIComponent(documentId)}`,
+  scheduled: (accountId: string) => `/accounts/${encodeURIComponent(accountId)}/scheduled-sends`,
   list: () => `/assignments`,
   collection: (documentId: string) => `/documents/${encodeURIComponent(documentId)}/assignments`,
   estimate: (documentId: string) =>
@@ -76,7 +82,7 @@ export class AssignmentsResource {
    *
    * Request: `{ method: "virtual" | "collect", signers: [{ id,
    * verification_method?: "Email" | "Whatsapp" | "DigitalCertificate" | "IdDocumentFaceMatchBasic",
-   * notification_methods?: ("Email" | "Whatsapp")[], embedded?, step? }], entries?,
+   * notification_methods?: ("Email" | "Whatsapp")[], embedded?, sign_as?, step? }], entries?,
    * message?, expires_at?, copy_receivers?, max_total_credits? }`. `entries` (page placements) is
    * required for `collect`. The `signerIds`/`signer_ids` aliases are
    * normalized into `signers`. `DigitalCertificate` signers require
@@ -103,7 +109,7 @@ export class AssignmentsResource {
    * assignment without creating it.
    *
    * Request sent: `{ method?, signers?: [{ verification_method?,
-   * notification_methods? }], entries? }`. Signer ids do not affect cost and
+   * notification_methods?, sign_as? }], entries? }`. Signer ids do not affect cost and
    * are not sent; each `signer_ids`/`signerIds` alias entry counts as one
    * Email signer (`{}`). `signers` is required for `virtual` (and when
    * `method` is omitted) and `entries` for `collect`; both are checked before
@@ -115,7 +121,7 @@ export class AssignmentsResource {
    */
   async estimateCost(documentId: string, input: EstimateAssignmentCostInput): Promise<CostEstimate> {
     const signers = (normalizeAssignmentInput(input).signers ?? []).map(
-      ({ verification_method, notification_methods }) => ({ verification_method, notification_methods }),
+      ({ verification_method, notification_methods, sign_as }) => ({ verification_method, notification_methods, sign_as }),
     );
     if (input.method === "collect") {
       if (!input.entries?.length) {
@@ -130,6 +136,55 @@ export class AssignmentsResource {
       ...(signers.length > 0 ? { signers } : {}),
       entries: input.entries,
     });
+  }
+
+  /** `GET /documents/{documentId}/signer-capacities` — staging; signer IDs and capacities, or [] before assignment. */
+  getSignerCapacities(documentId: string): Promise<AssignmentSignerCapacity[]> {
+    return this.http.get(`${paths.document(documentId)}/signer-capacities`);
+  }
+
+  /** `GET /documents/{documentId}/notification-history` — staging; delivery/open times per signer, nullable until recorded. */
+  getNotificationHistory(documentId: string): Promise<SignerNotificationHistory[]> {
+    return this.http.get(`${paths.document(documentId)}/notification-history`);
+  }
+
+  /**
+   * `POST /documents/{documentId}/scheduled-sends` — staging; retain an assignment
+   * until send_at (ISO time or Unix seconds). Returns ScheduledSend. Sends and
+   * charges nothing now; the five-minute worker checks permissions and balances
+   * again at dispatch. A document may have only one pending/processing send.
+   */
+  async schedule(documentId: string, input: ScheduleAssignmentInput): Promise<ScheduledSend> {
+    const body = normalizeAssignmentInput(input);
+    assertDigitalCertificateMethod(input.method ?? "virtual", body.signers);
+    return this.http.post(`${paths.document(documentId)}/scheduled-sends`, {
+      ...body, entries: collectEntries(input.entries), send_at: input.send_at,
+    });
+  }
+
+  /** `GET /accounts/{accountId}/scheduled-sends` — staging; assignments and envelopes, newest first; OAuth requires documents:write. */
+  async listScheduledSends(
+    accountId: string,
+    query: { document_id?: string; page?: number; perPage?: number } = {},
+  ): Promise<Page<ScheduledSend>> {
+    return this.http.getPage(withQuery(paths.scheduled(accountId), {
+      document_id: query.document_id, ...pageQuery(query.page, query.perPage),
+    }));
+  }
+
+  /** `PUT .../scheduled-sends/{scheduledSendId}/cancel` — staging; cancel pending only; other states return 409. No charge or notification. */
+  cancelScheduledSend(accountId: string, scheduledSendId: string): Promise<ScheduledSend> {
+    return this.http.put(`${paths.scheduled(accountId)}/${encodeURIComponent(scheduledSendId)}/cancel`);
+  }
+
+  /**
+   * `PUT .../scheduled-sends/{scheduledSendId}/send` — staging; dispatch now as
+   * the original scheduling member, charging and notifying as creation does.
+   * A refused dispatch stays pending; cancel it to prevent the later attempt.
+   * Never retried automatically. Non-pending sends return 409.
+   */
+  sendScheduledNow(accountId: string, scheduledSendId: string): Promise<ScheduledSend> {
+    return this.http.put(`${paths.scheduled(accountId)}/${encodeURIComponent(scheduledSendId)}/send`);
   }
 
   /**
@@ -270,7 +325,7 @@ function assertDigitalCertificateMethod(
  * to `expires_at`.
  */
 function normalizeAssignmentInput(
-  input: CreateAssignmentInput | EstimateAssignmentCostInput,
+  input: CreateAssignmentInput | EstimateAssignmentCostInput | ScheduleAssignmentInput,
 ): Record<string, unknown> & { signers?: EstimateAssignmentSignerInput[] } {
   const { signerIds, signer_ids, signers, method } = input;
   const { expiration, expires_at, message, copy_receivers, max_total_credits } = input as CreateAssignmentInput;
@@ -283,8 +338,8 @@ function normalizeAssignmentInput(
     return [{ id }];
   });
   const merged = [...explicit, ...fromIds].map((signer) => {
-    const { id, step, verification_method, notification_methods, embedded } = signer as AssignmentSignerInput;
-    return { id, step, verification_method, notification_methods, embedded };
+    const { id, step, verification_method, notification_methods, embedded, sign_as } = signer as AssignmentSignerInput;
+    return { id, step, verification_method, notification_methods, embedded, sign_as };
   });
   return {
     method,

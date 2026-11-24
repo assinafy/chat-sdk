@@ -936,9 +936,18 @@ const TEMPLATE_SIGNER_SCHEMA = {
   anyOf: [{ required: ["id"] }, { required: ["email"] }],
 } as const;
 
+const SIGNER_CAPACITY_SCHEMA = {
+  type: ["string", "null"],
+  enum: ["Sign", "Approve", "Acknowledge", "Party", "Witness", "Intervening", "Receipt",
+    "IssuerEndorserGuarantor", "IssuerEndorserGuarantorSurety", "Surety", "PartySurety",
+    "JointDebtor", "PartyJointDebtor", "ContractingParty", "ContractedParty", "Landlord",
+    "Tenant", "Buyer", "Seller", "AttorneyInFact", "LegalRepresentative", "Employer", "Employee", null],
+  description: "Staging: signer capacity; omitted or null uses Sign.",
+} as const;
+
 const ASSIGNMENT_SIGNER_SCHEMA = {
   type: "object",
-  properties: ASSIGNMENT_SIGNER_PROPERTIES,
+  properties: { ...ASSIGNMENT_SIGNER_PROPERTIES, sign_as: SIGNER_CAPACITY_SCHEMA },
   required: ["id"],
 } as const;
 
@@ -946,6 +955,7 @@ const ESTIMATE_ASSIGNMENT_SIGNER_SCHEMA = {
   type: "object",
   properties: {
     id: ASSIGNMENT_SIGNER_PROPERTIES.id,
+    sign_as: SIGNER_CAPACITY_SCHEMA,
     ...SIGNER_METHOD_PROPERTIES,
   },
 } as const;

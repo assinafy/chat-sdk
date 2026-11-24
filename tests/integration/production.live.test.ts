@@ -15,9 +15,9 @@ if (enabled && (!apiKey || !accountId)) {
   throw new Error("Production tests require ASSINAFY_PRODUCTION_API_KEY and ASSINAFY_PRODUCTION_ACCOUNT_ID");
 }
 
-const describeProduction = enabled ? describe.sequential : describe.skip;
+const describeProduction = describe.skipIf(!enabled);
 
-describeProduction("Assinafy API — opt-in disposable production resources", () => {
+describeProduction("Assinafy API — opt-in disposable production resources", { concurrent: false }, () => {
   const runId = `sdk-test-${crypto.randomUUID()}`;
   const pacedFetch = createLiveFetch(2_000);
   const requestScope = new AsyncLocalStorage<AbortSignal>();

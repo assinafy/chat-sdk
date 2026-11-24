@@ -241,11 +241,11 @@ export class OAuthResource {
   async getAuthorizationServerMetadata(
     issuer?: string,
   ): Promise<OAuthAuthorizationServerMetadata> {
-    const base = requireHttpsUrl(issuer ?? (await this.defaultIssuer()), "issuer").replace(/\/+$/, "");
+    const base = requireHttpsUrl(issuer ?? (await this.defaultIssuer()), "issuer");
     const metadata = await this.anonymous
       .fork({ baseUrl: base })
       .get<OAuthAuthorizationServerMetadata>(AUTHORIZATION_SERVER_PATH);
-    if (trimSlash(metadata?.issuer) !== trimSlash(base)) {
+    if (metadata?.issuer !== base) {
       throw new ConfigurationError(
         `Authorization-server metadata issuer "${metadata?.issuer ?? ""}" does not match "${base}"`,
       );
@@ -364,7 +364,7 @@ export class OAuthResource {
     }
 
     const issuer = query.get("iss") ?? "";
-    if (!issuer || trimSlash(issuer) !== trimSlash(expected.issuer || DEFAULT_ISSUER)) {
+    if (!issuer || issuer !== (expected.issuer ?? DEFAULT_ISSUER)) {
       throw callbackError("invalid_request", "The callback issuer does not match this session");
     }
 
@@ -763,11 +763,6 @@ function joinScopes(scopes: unknown): string {
     }
   }
   return [...new Set(scopes as string[])].join(" ");
-}
-
-/** Compare issuer identifiers ignoring a trailing slash. */
-function trimSlash(value: unknown): string {
-  return typeof value === "string" ? value.replace(/\/+$/, "") : "";
 }
 
 /**
